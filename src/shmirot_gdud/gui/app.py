@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import json
 from typing import List, Dict, Optional
 import pandas as pd
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Alignment
 
 from shmirot_gdud.core.models import Group, TimeWindow, WeeklySchedule
 from shmirot_gdud.core.scheduler import Scheduler
@@ -155,11 +155,56 @@ class App:
     def _show_schedule(self):
         self._clear_window()
         
+        # Top controls
+        top_frame = ttk.Frame(self.root, padding=10)
+        top_frame.pack(fill=tk.X)
+        
+        ttk.Button(top_frame, text=bidi_text("חזור לתפריט ראשי"), command=self._show_main_menu).pack(side=tk.RIGHT)
+        ttk.Button(top_frame, text=bidi_text("צור סידור עבודה"), command=self._generate_schedule).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
+
+        # Schedule Grid
+        grid_frame = ttk.Frame(self.root)
+        grid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.schedule_grid = ScheduleGrid(grid_frame, self.groups, self._on_schedule_change, bg="white")
+        
+        h_scroll = ttk.Scrollbar(grid_frame, orient=tk.HORIZONTAL, command=self.schedule_grid.xview)
+        v_scroll = ttk.Scrollbar(grid_frame, orient=tk.VERTICAL, command=self.schedule_grid.yview)
+        
+        self.schedule_grid.configure(xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
+        
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.schedule_grid.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        if self.schedule:
+            self.schedule_grid.set_schedule(self.schedule)
+            self._update_stats()
+
+    def _update_stats(self):
+        if not self.schedule or not self.groups:
+            return
+            
+        # Create a stats window if it doesn't exist or update it
+        # Since we removed the side panel to give more space to the grid, let's show stats in a popup or separate frame
+        # Or better, let's put it back but make it collapsible or smaller.
+        # For now, let's assume the user wants to see stats.
+        # Re-adding the stats panel to the left of the grid in _show_schedule would be best.
+        
+        # Wait, I removed the stats panel in previous step to focus on grid? No, I kept it.
+        # But I need to make sure it's created.
+        pass # The stats tree is created in _show_schedule, but I need to populate it there.
+        # Actually, let's refactor _show_schedule to include stats panel again properly.
+
+    def _show_schedule(self):
+        self._clear_window()
+        
         # Main container
         main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         main_paned.pack(fill=tk.BOTH, expand=True)
 
-        # Left Panel: Stats (RTL: Left side is actually "end" of reading, but let's put it on Left for now)
+        # Left Panel: Stats
         stats_frame = ttk.Frame(main_paned, width=300)
         main_paned.add(stats_frame, weight=1)
         
@@ -207,9 +252,9 @@ class App:
         
         if self.schedule:
             self.schedule_grid.set_schedule(self.schedule)
-            self._update_stats()
+            self._update_stats_content()
 
-    def _update_stats(self):
+    def _update_stats_content(self):
         if not self.schedule or not self.groups:
             return
             
@@ -229,6 +274,11 @@ class App:
             staffing = str(g.staffing_size) if g.staffing_size is not None else "-"
             
             self.stats_tree.insert("", tk.END, values=(bidi_text(g.name), staffing, count, f"{percent:.1f}%"))
+
+    def _update_stats(self):
+        # Wrapper to call content update if tree exists
+        if hasattr(self, 'stats_tree'):
+            self._update_stats_content()
 
     def _delete_group(self):
         selection = self.group_listbox.curselection()
@@ -457,19 +507,56 @@ class App:
                 df_groups.to_excel(writer, sheet_name='קבוצות', index=False)
                 df_stats.to_excel(writer, sheet_name='סטטיסטיקות', index=False)
                 
-                # Apply colors to schedule sheet
+                # Apply styles to schedule sheet
                 workbook = writer.book
                 ws = workbook['לוח שיבוץ']
+                
+                # Set RTL direction
+                ws.sheet_view.rightToLeft = True
                 
                 # Create color mapping
                 color_map = {g.name: g.color.replace("#", "") for g in self.groups}
                 
+                # Auto-adjust column widths
+                for column in ws.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = (max_length + 2) * 1.2
+                    ws.column_dimensions[column_letter].width = adjusted_width
+
+                # Apply colors and alignment
                 for row in ws.iter_rows(min_row=2, min_col=2):
                     for cell in row:
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
                         if cell.value in color_map:
                             fill = PatternFill(start_color=color_map[cell.value], end_color=color_map[cell.value], fill_type="solid")
                             cell.fill = fill
-            
+                
+                # Set RTL for other sheets too
+                workbook['קבוצות'].sheet_view.rightToLeft = True
+                workbook['סטטיסטיקות'].sheet_view.rightToLeft = True
+                
+                # Adjust widths for other sheets
+                for sheet_name in ['קבוצות', 'סטטיסטיקות']:
+                    ws_other = workbook[sheet_name]
+                    for column in ws_other.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = (max_length + 2) * 1.2
+                        ws_other.column_dimensions[column_letter].width = adjusted_width
+
             messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הייצוא הושלם בהצלחה"))
 
 def main():

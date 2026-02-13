@@ -14,7 +14,7 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title(bidi_text("מערכת שיבוץ שמירות גדודית"))
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x800") # Increased width for stats panel
 
         self.groups: List[Group] = []
         self.schedule: Optional[WeeklySchedule] = None
@@ -154,16 +154,43 @@ class App:
     def _show_schedule(self):
         self._clear_window()
         
+        # Main container
+        main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True)
+
+        # Left Panel: Stats (RTL: Left side is actually "end" of reading, but let's put it on Left for now)
+        stats_frame = ttk.Frame(main_paned, width=300)
+        main_paned.add(stats_frame, weight=1)
+        
+        ttk.Label(stats_frame, text=bidi_text("סטטיסטיקות שיבוץ"), font=("Arial", 14, "bold")).pack(pady=10)
+        
+        self.stats_tree = ttk.Treeview(stats_frame, columns=("Name", "Staffing", "Count", "Percent"), show="headings")
+        self.stats_tree.heading("Name", text=bidi_text("קבוצה"))
+        self.stats_tree.heading("Staffing", text=bidi_text("סד\"כ"))
+        self.stats_tree.heading("Count", text=bidi_text("משמרות"))
+        self.stats_tree.heading("Percent", text=bidi_text("%"))
+        
+        self.stats_tree.column("Name", width=100, anchor="center")
+        self.stats_tree.column("Staffing", width=50, anchor="center")
+        self.stats_tree.column("Count", width=60, anchor="center")
+        self.stats_tree.column("Percent", width=50, anchor="center")
+        
+        self.stats_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Right Panel: Schedule Grid
+        right_container = ttk.Frame(main_paned)
+        main_paned.add(right_container, weight=4)
+        
         # Top controls
-        top_frame = ttk.Frame(self.root, padding=10)
+        top_frame = ttk.Frame(right_container, padding=10)
         top_frame.pack(fill=tk.X)
         
         ttk.Button(top_frame, text=bidi_text("חזור לתפריט ראשי"), command=self._show_main_menu).pack(side=tk.RIGHT)
         ttk.Button(top_frame, text=bidi_text("צור סידור עבודה"), command=self._generate_schedule).pack(side=tk.LEFT, padx=5)
         ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
 
-        # Schedule Grid
-        grid_frame = ttk.Frame(self.root)
+        # Grid
+        grid_frame = ttk.Frame(right_container)
         grid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         self.schedule_grid = ScheduleGrid(grid_frame, self.groups, self._on_schedule_change, bg="white")
@@ -179,6 +206,28 @@ class App:
         
         if self.schedule:
             self.schedule_grid.set_schedule(self.schedule)
+            self._update_stats()
+
+    def _update_stats(self):
+        if not self.schedule or not self.groups:
+            return
+            
+        for item in self.stats_tree.get_children():
+            self.stats_tree.delete(item)
+            
+        total_slots = len(self.schedule.slots)
+        group_counts = {g.id: 0 for g in self.groups}
+        
+        for slot in self.schedule.slots:
+            if slot.group_id in group_counts:
+                group_counts[slot.group_id] += 1
+                
+        for g in self.groups:
+            count = group_counts[g.id]
+            percent = (count / total_slots * 100) if total_slots > 0 else 0
+            staffing = str(g.staffing_size) if g.staffing_size is not None else "-"
+            
+            self.stats_tree.insert("", tk.END, values=(bidi_text(g.name), staffing, count, f"{percent:.1f}%"))
 
     def _delete_group(self):
         selection = self.group_listbox.curselection()
@@ -294,11 +343,13 @@ class App:
         self._validate_and_show_errors()
         if hasattr(self, 'schedule_grid'):
             self.schedule_grid.set_schedule(self.schedule)
+            self._update_stats()
         else:
             self._show_schedule()
 
     def _on_schedule_change(self):
         self._validate_and_show_errors()
+        self._update_stats()
 
     def _validate_and_show_errors(self):
         if not self.schedule: return

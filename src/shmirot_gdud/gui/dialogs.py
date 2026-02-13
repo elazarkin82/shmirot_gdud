@@ -41,7 +41,11 @@ class TimeWindowDialog(tk.Toplevel):
         
         ttk.Label(control_frame, text=bidi_text("יום (0-6):")).grid(row=0, column=5, padx=5, sticky="e")
         self.day_var = tk.StringVar()
-        ttk.Entry(control_frame, textvariable=self.day_var, width=5, justify="right").grid(row=0, column=4, padx=5)
+        
+        # Combobox for Day selection instead of Entry
+        self.day_combo = ttk.Combobox(control_frame, textvariable=self.day_var, width=10, justify="right", state="readonly")
+        self.day_combo['values'] = [bidi_text(d) for d in ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]]
+        self.day_combo.grid(row=0, column=4, padx=5)
 
         ttk.Label(control_frame, text=bidi_text("התחלה (0-23):")).grid(row=0, column=3, padx=5, sticky="e")
         self.start_var = tk.StringVar()
@@ -73,18 +77,25 @@ class TimeWindowDialog(tk.Toplevel):
 
     def _add_window(self):
         try:
-            day_val = self.day_var.get()
+            day_str = self.day_var.get()
+            # Reverse bidi if needed to find in list, but combobox returns what is displayed
+            # We need to map back to index
+            days_display = [bidi_text(d) for d in ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]]
+            
+            if day_str not in days_display:
+                 raise ValueError(bidi_text("יש לבחור יום מהרשימה"))
+            
+            day = days_display.index(day_str)
+            
             start_val = self.start_var.get()
             end_val = self.end_var.get()
             
-            if not day_val or not start_val or not end_val:
-                raise ValueError(bidi_text("יש למלא את כל השדות"))
+            if not start_val or not end_val:
+                raise ValueError(bidi_text("יש למלא שעות התחלה וסיום"))
 
-            day = int(day_val)
             start = int(start_val)
             end = int(end_val)
 
-            if not (0 <= day <= 6): raise ValueError(bidi_text("יום חייב להיות בין 0 ל-6"))
             if not (0 <= start < 24): raise ValueError(bidi_text("שעת התחלה חייבת להיות בין 0 ל-23"))
             if not (0 <= end <= 24): raise ValueError(bidi_text("שעת סיום חייבת להיות בין 0 ל-24"))
             if start >= end: raise ValueError(bidi_text("שעת התחלה חייבת להיות קטנה משעת סיום"))

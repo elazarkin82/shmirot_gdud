@@ -14,7 +14,7 @@ from shmirot_gdud.gui.utils import bidi_text
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title(bidi_text("מערכת שיבוץ שמירות גדודית"))
+        self.root.title("מערכת שיבוץ שמירות גדודית")
         self.root.geometry("1400x800") # Increased width for stats panel
 
         self.groups: List[Group] = []

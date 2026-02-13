@@ -36,6 +36,7 @@ class Group:
     weekly_guard_quota: Optional[int] = None # Hard constraint if set
     hard_unavailability_rules: List[TimeWindow] = field(default_factory=list)
     primary_activity_windows: List[TimeWindow] = field(default_factory=list)
+    can_guard_simultaneously: bool = True # New constraint: Can members guard at the same time?
     
     def validate(self) -> bool:
         # Must have either staffing_size or weekly_guard_quota
@@ -48,7 +49,8 @@ class Group:
             "staffing_size": self.staffing_size,
             "weekly_guard_quota": self.weekly_guard_quota,
             "hard_unavailability_rules": [r.to_dict() for r in self.hard_unavailability_rules],
-            "primary_activity_windows": [w.to_dict() for w in self.primary_activity_windows]
+            "primary_activity_windows": [w.to_dict() for w in self.primary_activity_windows],
+            "can_guard_simultaneously": self.can_guard_simultaneously
         }
 
     @staticmethod
@@ -59,7 +61,8 @@ class Group:
             staffing_size=data.get("staffing_size"),
             weekly_guard_quota=data.get("weekly_guard_quota"),
             hard_unavailability_rules=[TimeWindow.from_dict(r) for r in data.get("hard_unavailability_rules", [])],
-            primary_activity_windows=[TimeWindow.from_dict(w) for w in data.get("primary_activity_windows", [])]
+            primary_activity_windows=[TimeWindow.from_dict(w) for w in data.get("primary_activity_windows", [])],
+            can_guard_simultaneously=data.get("can_guard_simultaneously", True)
         )
 
 @dataclass

@@ -121,6 +121,10 @@ class App:
         self.quota_var = tk.StringVar()
         ttk.Entry(info_frame, textvariable=self.quota_var, justify="right").grid(row=2, column=1, sticky=tk.EW)
         
+        # Simultaneous Guarding Checkbox
+        self.simultaneous_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(info_frame, text=bidi_text("מאפשר שמירה כפולה (בו-זמנית)"), variable=self.simultaneous_var).grid(row=3, column=0, columnspan=3, sticky=tk.E, pady=5)
+        
         info_frame.columnconfigure(1, weight=1)
 
         # Constraints List
@@ -196,9 +200,10 @@ class App:
         if selection:
             idx = selection[0]
             group = self.groups[idx]
-            self.name_var.set(group.name) # Don't bidi here, let Entry handle it or user type
+            self.name_var.set(group.name)
             self.staffing_var.set(str(group.staffing_size) if group.staffing_size is not None else "")
             self.quota_var.set(str(group.weekly_guard_quota) if group.weekly_guard_quota is not None else "")
+            self.simultaneous_var.set(group.can_guard_simultaneously)
             
             self._refresh_constraints_list(group)
             self._refresh_activity_list(group)
@@ -223,6 +228,7 @@ class App:
             idx = selection[0]
             group = self.groups[idx]
             group.name = self.name_var.get()
+            group.can_guard_simultaneously = self.simultaneous_var.get()
             
             try:
                 s_size = self.staffing_var.get()
@@ -273,6 +279,7 @@ class App:
         self.name_var.set("")
         self.staffing_var.set("")
         self.quota_var.set("")
+        self.simultaneous_var.set(True)
         self.constraints_list.delete(0, tk.END)
         self.activity_list.delete(0, tk.END)
 
@@ -368,6 +375,7 @@ class App:
                     "שם": g.name,
                     "סד\"כ": g.staffing_size,
                     "מכסה שבועית": g.weekly_guard_quota,
+                    "מאפשר שמירה כפולה": "כן" if g.can_guard_simultaneously else "לא",
                     "אי-זמינות": "; ".join([f"יום {r.day} {r.start_hour}-{r.end_hour}" for r in g.hard_unavailability_rules]),
                     "חלונות פעילות": "; ".join([f"יום {r.day} {r.start_hour}-{r.end_hour}" for r in g.primary_activity_windows])
                 })

@@ -66,7 +66,9 @@ class Scheduler:
             if g1 and self._can_assign(g1, day, hour, current_counts, group_targets):
                  # Check if we want to double up (Soft constraint: prefer same group)
                  # But only if it doesn't violate hard constraints or activity windows too badly
-                 g2 = g1
+                 # AND if the group allows simultaneous guarding
+                 if g1.can_guard_simultaneously:
+                     g2 = g1
             
             if not g2:
                 g2 = self._select_best_group(day, hour, available_groups, current_counts, group_targets, exclude_group_id=g1.id if g1 else None)
@@ -148,6 +150,9 @@ class Scheduler:
         errors = []
         group_counts = {}
         
+        # Map slots by (day, hour) to check simultaneous guarding
+        slots_by_time = {}
+        
         for slot in self.schedule.slots:
             if not slot.group_id:
                 continue
@@ -158,13 +163,29 @@ class Scheduler:
                 
             group_counts[group.id] = group_counts.get(group.id, 0) + 1
             
+            # Check availability
             if not self._is_group_available(group, slot.day, slot.hour):
                 errors.append(f"Group {group.name} assigned to unavailable slot Day {slot.day} Hour {slot.hour}")
 
+            # Collect for simultaneous check
+            key = (slot.day, slot.hour)
+            if key not in slots_by_time:
+                slots_by_time[key] = []
+            slots_by_time[key].append(group)
+
+        # Check quotas
         for group in self.groups:
             if group.weekly_guard_quota is not None:
                 count = group_counts.get(group.id, 0)
                 if count > group.weekly_guard_quota:
                      errors.append(f"Group {group.name} exceeded quota: {count} > {group.weekly_guard_quota}")
-        
+
+        # Check simultaneous guarding constraint
+        for (day, hour), groups_in_slot in slots_by_time.items():
+            if len(groups_in_slot) == 2:
+                g1, g2 = groups_in_slot[0], groups_in_slot[1]
+                if g1.id == g2.id:
+                    if not g1.can_guard_simultaneously:
+                        errors.append(f"Group {g1.name} guarding simultaneously at Day {day} Hour {hour} but not allowed")
+
         return errors

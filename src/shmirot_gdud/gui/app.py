@@ -196,7 +196,7 @@ class App:
         if selection:
             idx = selection[0]
             group = self.groups[idx]
-            self.name_var.set(bidi_text(group.name))
+            self.name_var.set(group.name) # Don't bidi here, let Entry handle it or user type
             self.staffing_var.set(str(group.staffing_size) if group.staffing_size is not None else "")
             self.quota_var.set(str(group.weekly_guard_quota) if group.weekly_guard_quota is not None else "")
             
@@ -222,34 +222,7 @@ class App:
         if selection:
             idx = selection[0]
             group = self.groups[idx]
-            group.name = bidi_text(self.name_var.get()) # Reverse back if needed, but bidi_text is symmetric for pure Hebrew
-            # Actually, bidi_text reverses. If user types normally in LTR field, it's fine.
-            # If we display reversed, user sees reversed.
-            # Let's assume user types normally.
-            # Wait, if we reverse for display, we must reverse back for storage OR just store normally and reverse only for display.
-            # The issue is Tkinter doesn't support RTL rendering natively.
-            # If we reverse the string "שלום", it becomes "םולש" and renders correctly visually in LTR context.
-            # So for storage we should probably keep it normal if possible, but if we read from Entry, it might be tricky.
-            # Let's assume we store normal and reverse for display.
-            
-            # However, Entry widget with justify="right" might still show letters in LTR order if not reversed.
-            # If I type "abc", it shows "abc" aligned right.
-            # If I type "אבג", it shows "אבג" aligned right (which is correct order for Hebrew).
-            # The issue described "הטקסט נכתב הפוך" suggests that the environment might be forcing LTR on characters.
-            # If "שינוע" becomes "עוניש", it means it's being displayed LTR character by character.
-            # Reversing it manually "עוניש" -> "שינוע" would make it look right in LTR.
-            
-            # Let's try to just use the value from Entry as is for storage, assuming the user sees it correctly or we fix display.
-            # But if the user says "כאשר אני רושם... זה רושם הפוך", it means the input widget itself is problematic?
-            # Or maybe just the labels I created.
-            
-            # Let's stick to reversing labels and buttons. For Entry, it's usually OS dependent.
-            # If the user says "כאשר אני רושם", it sounds like Entry issue.
-            # But standard Tkinter Entry usually handles system keyboard input correctly.
-            # Maybe the issue is only with my hardcoded strings in the code?
-            # "כל כותר בתפריט או שדה או פנל... נכתב ltr ולא rtl"
-            
-            group.name = self.name_var.get() # Store as is
+            group.name = self.name_var.get()
             
             try:
                 s_size = self.staffing_var.get()

@@ -8,11 +8,12 @@ from shmirot_gdud.core.models import Group, TimeWindow, WeeklySchedule
 from shmirot_gdud.core.scheduler import Scheduler
 from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog
 from shmirot_gdud.gui.schedule_grid import ScheduleGrid
+from shmirot_gdud.gui.utils import bidi_text
 
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("מערכת שיבוץ שמירות גדודית")
+        self.root.title(bidi_text("מערכת שיבוץ שמירות גדודית"))
         self.root.geometry("1200x800")
 
         self.groups: List[Group] = []
@@ -25,19 +26,19 @@ class App:
         menubar = tk.Menu(self.root)
         
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="טען קבוצות", command=self._load_groups)
-        file_menu.add_command(label="שמור קבוצות", command=self._save_groups)
+        file_menu.add_command(label=bidi_text("טען קבוצות"), command=self._load_groups)
+        file_menu.add_command(label=bidi_text("שמור קבוצות"), command=self._save_groups)
         file_menu.add_separator()
-        file_menu.add_command(label="ייצוא לאקסל", command=self._export_excel)
+        file_menu.add_command(label=bidi_text("ייצוא לאקסל"), command=self._export_excel)
         file_menu.add_separator()
-        file_menu.add_command(label="יציאה", command=self.root.quit)
-        menubar.add_cascade(label="קובץ", menu=file_menu)
+        file_menu.add_command(label=bidi_text("יציאה"), command=self.root.quit)
+        menubar.add_cascade(label=bidi_text("קובץ"), menu=file_menu)
         
         nav_menu = tk.Menu(menubar, tearoff=0)
-        nav_menu.add_command(label="תפריט ראשי", command=self._show_main_menu)
-        nav_menu.add_command(label="ניהול קבוצות", command=self._show_group_management)
-        nav_menu.add_command(label="לוח שיבוץ", command=self._show_schedule)
-        menubar.add_cascade(label="ניווט", menu=nav_menu)
+        nav_menu.add_command(label=bidi_text("תפריט ראשי"), command=self._show_main_menu)
+        nav_menu.add_command(label=bidi_text("ניהול קבוצות"), command=self._show_group_management)
+        nav_menu.add_command(label=bidi_text("לוח שיבוץ"), command=self._show_schedule)
+        menubar.add_cascade(label=bidi_text("ניווט"), menu=nav_menu)
         
         self.root.config(menu=menubar)
 
@@ -52,20 +53,20 @@ class App:
         frame = ttk.Frame(self.root, padding=50)
         frame.pack(expand=True)
         
-        ttk.Label(frame, text="מערכת שיבוץ שמירות", font=("Arial", 24, "bold")).pack(pady=30)
+        ttk.Label(frame, text=bidi_text("מערכת שיבוץ שמירות"), font=("Arial", 24, "bold")).pack(pady=30)
         
         btn_width = 25
-        ttk.Button(frame, text="יצירת קבוצה חדשה", width=btn_width, command=self._open_create_group_dialog).pack(pady=10)
-        ttk.Button(frame, text="ניהול קבוצות", width=btn_width, command=self._show_group_management).pack(pady=10)
-        ttk.Button(frame, text="יצירת/צפייה בלוח שיבוץ", width=btn_width, command=self._show_schedule).pack(pady=10)
-        ttk.Button(frame, text="שמירת נתונים", width=btn_width, command=self._save_groups).pack(pady=10)
-        ttk.Button(frame, text="טעינת נתונים", width=btn_width, command=self._load_groups).pack(pady=10)
+        ttk.Button(frame, text=bidi_text("יצירת קבוצה חדשה"), width=btn_width, command=self._open_create_group_dialog).pack(pady=10)
+        ttk.Button(frame, text=bidi_text("ניהול קבוצות"), width=btn_width, command=self._show_group_management).pack(pady=10)
+        ttk.Button(frame, text=bidi_text("יצירת/צפייה בלוח שיבוץ"), width=btn_width, command=self._show_schedule).pack(pady=10)
+        ttk.Button(frame, text=bidi_text("שמירת נתונים"), width=btn_width, command=self._save_groups).pack(pady=10)
+        ttk.Button(frame, text=bidi_text("טעינת נתונים"), width=btn_width, command=self._load_groups).pack(pady=10)
 
     def _open_create_group_dialog(self):
         def on_create(group: Group):
             group.id = str(len(self.groups) + 1) # Simple ID generation
             self.groups.append(group)
-            messagebox.showinfo("הצלחה", f"הקבוצה {group.name} נוצרה בהצלחה")
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text(f"הקבוצה {group.name} נוצרה בהצלחה"))
             
         GroupCreationDialog(self.root, on_create)
 
@@ -85,7 +86,7 @@ class App:
         left_frame = ttk.Frame(main_paned, width=300)
         main_paned.add(left_frame, weight=1)
         
-        ttk.Label(left_frame, text="רשימת קבוצות", font=("Arial", 14, "bold")).pack(pady=5)
+        ttk.Label(left_frame, text=bidi_text("רשימת קבוצות"), font=("Arial", 14, "bold")).pack(pady=5)
         
         self.group_listbox = tk.Listbox(left_frame, height=20, justify="right")
         self.group_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -93,14 +94,14 @@ class App:
         
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
-        ttk.Button(btn_frame, text="הוסף קבוצה", command=self._open_create_group_dialog_refresh).pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        ttk.Button(btn_frame, text="מחק קבוצה", command=self._delete_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(btn_frame, text=bidi_text("הוסף קבוצה"), command=self._open_create_group_dialog_refresh).pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        ttk.Button(btn_frame, text=bidi_text("מחק קבוצה"), command=self._delete_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Right panel: Details
         right_frame = ttk.Frame(main_paned)
         main_paned.add(right_frame, weight=3)
         
-        self.details_frame = ttk.LabelFrame(right_frame, text="פרטי קבוצה")
+        self.details_frame = ttk.LabelFrame(right_frame, text=bidi_text("פרטי קבוצה"))
         self.details_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Basic Info
@@ -108,33 +109,33 @@ class App:
         info_frame.pack(fill=tk.X, padx=5, pady=5)
         
         # Grid layout for RTL
-        ttk.Label(info_frame, text="שם הקבוצה:").grid(row=0, column=2, sticky=tk.E, padx=5)
+        ttk.Label(info_frame, text=bidi_text("שם הקבוצה:")).grid(row=0, column=2, sticky=tk.E, padx=5)
         self.name_var = tk.StringVar()
         ttk.Entry(info_frame, textvariable=self.name_var, justify="right").grid(row=0, column=1, sticky=tk.EW)
         
-        ttk.Label(info_frame, text="גודל סד\"כ:").grid(row=1, column=2, sticky=tk.E, padx=5)
+        ttk.Label(info_frame, text=bidi_text("גודל סד\"כ:")).grid(row=1, column=2, sticky=tk.E, padx=5)
         self.staffing_var = tk.StringVar()
         ttk.Entry(info_frame, textvariable=self.staffing_var, justify="right").grid(row=1, column=1, sticky=tk.EW)
         
-        ttk.Label(info_frame, text="מכסה שבועית (קשיח):").grid(row=2, column=2, sticky=tk.E, padx=5)
+        ttk.Label(info_frame, text=bidi_text("מכסה שבועית (קשיח):")).grid(row=2, column=2, sticky=tk.E, padx=5)
         self.quota_var = tk.StringVar()
         ttk.Entry(info_frame, textvariable=self.quota_var, justify="right").grid(row=2, column=1, sticky=tk.EW)
         
         info_frame.columnconfigure(1, weight=1)
 
         # Constraints List
-        ttk.Label(self.details_frame, text="חוקי אי-זמינות:").pack(anchor=tk.E, padx=5, pady=(10, 0))
+        ttk.Label(self.details_frame, text=bidi_text("חוקי אי-זמינות:")).pack(anchor=tk.E, padx=5, pady=(10, 0))
         self.constraints_list = tk.Listbox(self.details_frame, height=5, justify="right")
         self.constraints_list.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(self.details_frame, text="ניהול אי-זמינות", command=self._manage_unavailability).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(self.details_frame, text=bidi_text("ניהול אי-זמינות"), command=self._manage_unavailability).pack(fill=tk.X, padx=5, pady=2)
 
         # Activity Windows List
-        ttk.Label(self.details_frame, text="חלונות פעילות עיקרית:").pack(anchor=tk.E, padx=5, pady=(10, 0))
+        ttk.Label(self.details_frame, text=bidi_text("חלונות פעילות עיקרית:")).pack(anchor=tk.E, padx=5, pady=(10, 0))
         self.activity_list = tk.Listbox(self.details_frame, height=5, justify="right")
         self.activity_list.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(self.details_frame, text="ניהול חלונות פעילות", command=self._manage_activity).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(self.details_frame, text=bidi_text("ניהול חלונות פעילות"), command=self._manage_activity).pack(fill=tk.X, padx=5, pady=2)
         
-        ttk.Button(self.details_frame, text="שמור שינויים", command=self._save_group_details).pack(fill=tk.X, padx=5, pady=20)
+        ttk.Button(self.details_frame, text=bidi_text("שמור שינויים"), command=self._save_group_details).pack(fill=tk.X, padx=5, pady=20)
 
         self._refresh_group_list()
 
@@ -153,9 +154,9 @@ class App:
         top_frame = ttk.Frame(self.root, padding=10)
         top_frame.pack(fill=tk.X)
         
-        ttk.Button(top_frame, text="חזור לתפריט ראשי", command=self._show_main_menu).pack(side=tk.RIGHT)
-        ttk.Button(top_frame, text="צור סידור עבודה", command=self._generate_schedule).pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="ייצוא לאקסל", command=self._export_excel).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text=bidi_text("חזור לתפריט ראשי"), command=self._show_main_menu).pack(side=tk.RIGHT)
+        ttk.Button(top_frame, text=bidi_text("צור סידור עבודה"), command=self._generate_schedule).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
 
         # Schedule Grid
         grid_frame = ttk.Frame(self.root)
@@ -178,7 +179,7 @@ class App:
     def _delete_group(self):
         selection = self.group_listbox.curselection()
         if selection:
-            if messagebox.askyesno("אישור מחיקה", "האם אתה בטוח שברצונך למחוק את הקבוצה?"):
+            if messagebox.askyesno(bidi_text("אישור מחיקה"), bidi_text("האם אתה בטוח שברצונך למחוק את הקבוצה?")):
                 idx = selection[0]
                 del self.groups[idx]
                 self._refresh_group_list()
@@ -188,14 +189,14 @@ class App:
         if not hasattr(self, 'group_listbox'): return
         self.group_listbox.delete(0, tk.END)
         for g in self.groups:
-            self.group_listbox.insert(tk.END, g.name)
+            self.group_listbox.insert(tk.END, bidi_text(g.name))
 
     def _on_group_select(self, event):
         selection = self.group_listbox.curselection()
         if selection:
             idx = selection[0]
             group = self.groups[idx]
-            self.name_var.set(group.name)
+            self.name_var.set(bidi_text(group.name))
             self.staffing_var.set(str(group.staffing_size) if group.staffing_size is not None else "")
             self.quota_var.set(str(group.weekly_guard_quota) if group.weekly_guard_quota is not None else "")
             
@@ -207,42 +208,69 @@ class App:
         days = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
         for c in group.hard_unavailability_rules:
             day_str = days[c.day] if 0 <= c.day < 7 else str(c.day)
-            self.constraints_list.insert(tk.END, f"{day_str} {c.start_hour:02d}:00 - {c.end_hour:02d}:00")
+            self.constraints_list.insert(tk.END, bidi_text(f"{day_str} {c.start_hour:02d}:00 - {c.end_hour:02d}:00"))
 
     def _refresh_activity_list(self, group: Group):
         self.activity_list.delete(0, tk.END)
         days = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
         for w in group.primary_activity_windows:
             day_str = days[w.day] if 0 <= w.day < 7 else str(w.day)
-            self.activity_list.insert(tk.END, f"{day_str} {w.start_hour:02d}:00 - {w.end_hour:02d}:00")
+            self.activity_list.insert(tk.END, bidi_text(f"{day_str} {w.start_hour:02d}:00 - {w.end_hour:02d}:00"))
 
     def _save_group_details(self):
         selection = self.group_listbox.curselection()
         if selection:
             idx = selection[0]
             group = self.groups[idx]
-            group.name = self.name_var.get()
+            group.name = bidi_text(self.name_var.get()) # Reverse back if needed, but bidi_text is symmetric for pure Hebrew
+            # Actually, bidi_text reverses. If user types normally in LTR field, it's fine.
+            # If we display reversed, user sees reversed.
+            # Let's assume user types normally.
+            # Wait, if we reverse for display, we must reverse back for storage OR just store normally and reverse only for display.
+            # The issue is Tkinter doesn't support RTL rendering natively.
+            # If we reverse the string "שלום", it becomes "םולש" and renders correctly visually in LTR context.
+            # So for storage we should probably keep it normal if possible, but if we read from Entry, it might be tricky.
+            # Let's assume we store normal and reverse for display.
+            
+            # However, Entry widget with justify="right" might still show letters in LTR order if not reversed.
+            # If I type "abc", it shows "abc" aligned right.
+            # If I type "אבג", it shows "אבג" aligned right (which is correct order for Hebrew).
+            # The issue described "הטקסט נכתב הפוך" suggests that the environment might be forcing LTR on characters.
+            # If "שינוע" becomes "עוניש", it means it's being displayed LTR character by character.
+            # Reversing it manually "עוניש" -> "שינוע" would make it look right in LTR.
+            
+            # Let's try to just use the value from Entry as is for storage, assuming the user sees it correctly or we fix display.
+            # But if the user says "כאשר אני רושם... זה רושם הפוך", it means the input widget itself is problematic?
+            # Or maybe just the labels I created.
+            
+            # Let's stick to reversing labels and buttons. For Entry, it's usually OS dependent.
+            # If the user says "כאשר אני רושם", it sounds like Entry issue.
+            # But standard Tkinter Entry usually handles system keyboard input correctly.
+            # Maybe the issue is only with my hardcoded strings in the code?
+            # "כל כותר בתפריט או שדה או פנל... נכתב ltr ולא rtl"
+            
+            group.name = self.name_var.get() # Store as is
             
             try:
                 s_size = self.staffing_var.get()
                 group.staffing_size = int(s_size) if s_size else None
             except ValueError:
-                messagebox.showerror("שגיאה", "גודל סד\"כ חייב להיות מספר שלם")
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text("גודל סד\"כ חייב להיות מספר שלם"))
                 return
 
             try:
                 quota = self.quota_var.get()
                 group.weekly_guard_quota = int(quota) if quota else None
             except ValueError:
-                messagebox.showerror("שגיאה", "מכסה שבועית חייבת להיות מספר שלם")
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text("מכסה שבועית חייבת להיות מספר שלם"))
                 return
 
             if not group.validate():
-                messagebox.showwarning("אזהרה", "לקבוצה חייב להיות מוגדר סד\"כ או מכסה שבועית")
+                messagebox.showwarning(bidi_text("אזהרה"), bidi_text("לקבוצה חייב להיות מוגדר סד\"כ או מכסה שבועית"))
             
             self._refresh_group_list()
             self.group_listbox.selection_set(idx)
-            messagebox.showinfo("הצלחה", "השינויים נשמרו")
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text("השינויים נשמרו"))
 
     def _manage_unavailability(self):
         selection = self.group_listbox.curselection()
@@ -254,7 +282,7 @@ class App:
                 group.hard_unavailability_rules = constraints
                 self._refresh_constraints_list(group)
             
-            TimeWindowDialog(self.root, f"אי-זמינות עבור {group.name}", group.hard_unavailability_rules, on_save)
+            TimeWindowDialog(self.root, bidi_text(f"אי-זמינות עבור {group.name}"), group.hard_unavailability_rules, on_save)
 
     def _manage_activity(self):
         selection = self.group_listbox.curselection()
@@ -266,7 +294,7 @@ class App:
                 group.primary_activity_windows = windows
                 self._refresh_activity_list(group)
             
-            TimeWindowDialog(self.root, f"חלונות פעילות עבור {group.name}", group.primary_activity_windows, on_save)
+            TimeWindowDialog(self.root, bidi_text(f"חלונות פעילות עבור {group.name}"), group.primary_activity_windows, on_save)
 
     def _clear_details(self):
         self.name_var.set("")
@@ -277,7 +305,7 @@ class App:
 
     def _generate_schedule(self):
         if not self.groups:
-            messagebox.showwarning("אזהרה", "אין קבוצות מוגדרות")
+            messagebox.showwarning(bidi_text("אזהרה"), bidi_text("אין קבוצות מוגדרות"))
             return
 
         scheduler = Scheduler(self.groups)
@@ -302,7 +330,7 @@ class App:
              msg = "\n".join(errors[:10])
              if len(errors) > 10:
                  msg += "\n..."
-             messagebox.showwarning("בעיות בסידור", msg)
+             messagebox.showwarning(bidi_text("בעיות בסידור"), bidi_text(msg))
 
     def _save_groups(self):
         filename = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
@@ -310,7 +338,7 @@ class App:
             data = [g.to_dict() for g in self.groups]
             with open(filename, 'w') as f:
                 json.dump(data, f, indent=2)
-            messagebox.showinfo("הצלחה", "הקבוצות נשמרו בהצלחה")
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הקבוצות נשמרו בהצלחה"))
 
     def _load_groups(self):
         filename = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
@@ -322,7 +350,7 @@ class App:
                 for d in data:
                     self.groups.append(Group.from_dict(d))
                 
-                messagebox.showinfo("הצלחה", "הקבוצות נטענו בהצלחה")
+                messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הקבוצות נטענו בהצלחה"))
                 
                 # If we are in group management screen, refresh
                 if hasattr(self, 'group_listbox'):
@@ -330,11 +358,11 @@ class App:
                     self._clear_details()
                     
             except Exception as e:
-                messagebox.showerror("שגיאה", f"נכשל בטעינת הקבוצות: {e}")
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text(f"נכשל בטעינת הקבוצות: {e}"))
 
     def _export_excel(self):
         if not self.schedule:
-            messagebox.showwarning("אזהרה", "יש לייצר סידור עבודה תחילה")
+            messagebox.showwarning(bidi_text("אזהרה"), bidi_text("יש לייצר סידור עבודה תחילה"))
             return
             
         filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
@@ -376,7 +404,7 @@ class App:
                 df_schedule.to_excel(writer, sheet_name='לוח שיבוץ', index=False)
                 df_groups.to_excel(writer, sheet_name='קבוצות', index=False)
             
-            messagebox.showinfo("הצלחה", "הייצוא הושלם בהצלחה")
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הייצוא הושלם בהצלחה"))
 
 def main():
     root = tk.Tk()

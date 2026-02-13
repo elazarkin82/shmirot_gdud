@@ -10,7 +10,7 @@ class ScheduleGrid(tk.Canvas):
         self.on_change = on_change
         self.schedule: Optional[WeeklySchedule] = None
         
-        self.cell_width = 100
+        self.cell_width = 140
         self.cell_height = 40
         self.header_height = 30
         self.sidebar_width = 60
@@ -48,7 +48,7 @@ class ScheduleGrid(tk.Canvas):
         sidebar_x = grid_width
         
         # Sidebar background
-        self.create_rectangle(sidebar_x, 0, total_width, total_height, fill="#f0f0f0", outline="gray")
+        self.create_rectangle(sidebar_x, 0, total_width, total_height, fill="#f0f0f0", outline="")
         
         for h in range(24):
             y = self.header_height + h * self.cell_height
@@ -60,10 +60,10 @@ class ScheduleGrid(tk.Canvas):
             x = (6 - d) * self.cell_width
             
             # Header background
-            self.create_rectangle(x, 0, x + self.cell_width, self.header_height, fill="#e0e0e0", outline="gray")
+            self.create_rectangle(x, 0, x + self.cell_width, self.header_height, fill="#e0e0e0", outline="")
             self.create_text(x + self.cell_width//2, self.header_height//2, text=bidi_text(day))
 
-        # Draw Grid
+        # Draw Grid Content
         slot_map = {}
         for slot in self.schedule.slots:
             slot_map[(slot.day, slot.hour, slot.position)] = slot.group_id
@@ -73,24 +73,39 @@ class ScheduleGrid(tk.Canvas):
                 x = (6 - d) * self.cell_width
                 y = self.header_height + h * self.cell_height
                 
-                # Draw cell border
-                self.create_rectangle(x, y, x + self.cell_width, y + self.cell_height, outline="gray")
+                half_width = self.cell_width // 2
                 
-                # Position 1 (Top half)
+                # Position 1 (Right half)
                 g1_id = slot_map.get((d, h, 1))
                 g1_name = self._get_group_name(g1_id)
-                self._draw_slot(x, y, self.cell_width, self.cell_height//2, bidi_text(g1_name), (d, h, 1))
+                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), (d, h, 1))
                 
-                # Position 2 (Bottom half)
+                # Position 2 (Left half)
                 g2_id = slot_map.get((d, h, 2))
                 g2_name = self._get_group_name(g2_id)
-                self._draw_slot(x, y + self.cell_height//2, self.cell_width, self.cell_height//2, bidi_text(g2_name), (d, h, 2))
+                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), (d, h, 2))
+
+        # Draw Grid Lines (Overlay for thickness)
+        
+        # Horizontal lines (Hours) - Across Grid and Sidebar
+        for h in range(25): # 0 to 24 inclusive
+            y = self.header_height + h * self.cell_height
+            self.create_line(0, y, total_width, y, fill="black", width=2)
+
+        # Vertical lines (Days) - Including Sidebar separator
+        for d in range(8): # 0 to 7 inclusive
+            x = d * self.cell_width
+            self.create_line(x, 0, x, total_height, fill="black", width=2)
+            
+        # Top border line
+        self.create_line(0, 0, total_width, 0, fill="black", width=2)
 
         # Update scroll region
         self.config(scrollregion=(0, 0, total_width, total_height))
 
     def _draw_slot(self, x, y, w, h, text, slot_key):
         # Background
+        # Use thinner outline for internal slot separation
         rect_id = self.create_rectangle(x, y, x+w, y+h, fill="white", outline="lightgray", tags=f"slot_{slot_key}")
         # Text
         text_id = self.create_text(x+w//2, y+h//2, text=text, font=("Arial", 8), tags=f"text_{slot_key}")
@@ -117,9 +132,10 @@ class ScheduleGrid(tk.Canvas):
         if not (0 <= d < 7 and 0 <= h < 24):
             return None
             
-        # Check if top or bottom half
-        rel_y = (y - self.header_height) % self.cell_height
-        pos = 1 if rel_y < self.cell_height // 2 else 2
+        # Check if right or left half
+        rel_x = x % self.cell_width
+        # If Pos 1 is Right half (x > half_width)
+        pos = 1 if rel_x >= self.cell_width // 2 else 2
         
         return (d, h, pos)
 

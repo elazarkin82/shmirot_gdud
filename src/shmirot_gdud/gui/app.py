@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import json
 from typing import List, Dict, Optional
 import pandas as pd
+from openpyxl.styles import PatternFill
 
 from shmirot_gdud.core.models import Group, TimeWindow, WeeklySchedule
 from shmirot_gdud.core.scheduler import Scheduler
@@ -431,10 +432,43 @@ class App:
                     "חלונות פעילות": "; ".join([f"יום {r.day} {r.start_hour}-{r.end_hour}" for r in g.primary_activity_windows])
                 })
             df_groups = pd.DataFrame(groups_data)
+            
+            # Stats Data
+            total_slots = len(self.schedule.slots)
+            group_counts = {g.id: 0 for g in self.groups}
+            for slot in self.schedule.slots:
+                if slot.group_id in group_counts:
+                    group_counts[slot.group_id] += 1
+            
+            stats_data = []
+            for g in self.groups:
+                count = group_counts[g.id]
+                percent = (count / total_slots * 100) if total_slots > 0 else 0
+                stats_data.append({
+                    "קבוצה": g.name,
+                    "סד\"כ": g.staffing_size,
+                    "משמרות": count,
+                    "אחוז": f"{percent:.1f}%"
+                })
+            df_stats = pd.DataFrame(stats_data)
 
-            with pd.ExcelWriter(filename) as writer:
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
                 df_schedule.to_excel(writer, sheet_name='לוח שיבוץ', index=False)
                 df_groups.to_excel(writer, sheet_name='קבוצות', index=False)
+                df_stats.to_excel(writer, sheet_name='סטטיסטיקות', index=False)
+                
+                # Apply colors to schedule sheet
+                workbook = writer.book
+                ws = workbook['לוח שיבוץ']
+                
+                # Create color mapping
+                color_map = {g.name: g.color.replace("#", "") for g in self.groups}
+                
+                for row in ws.iter_rows(min_row=2, min_col=2):
+                    for cell in row:
+                        if cell.value in color_map:
+                            fill = PatternFill(start_color=color_map[cell.value], end_color=color_map[cell.value], fill_type="solid")
+                            cell.fill = fill
             
             messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הייצוא הושלם בהצלחה"))
 

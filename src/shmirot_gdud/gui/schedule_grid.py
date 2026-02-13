@@ -77,13 +77,13 @@ class ScheduleGrid(tk.Canvas):
                 
                 # Position 1 (Right half)
                 g1_id = slot_map.get((d, h, 1))
-                g1_name = self._get_group_name(g1_id)
-                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), (d, h, 1))
+                g1_name, g1_color = self._get_group_info(g1_id)
+                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (d, h, 1))
                 
                 # Position 2 (Left half)
                 g2_id = slot_map.get((d, h, 2))
-                g2_name = self._get_group_name(g2_id)
-                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), (d, h, 2))
+                g2_name, g2_color = self._get_group_info(g2_id)
+                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (d, h, 2))
 
         # Draw Grid Lines (Overlay for thickness)
         
@@ -103,19 +103,19 @@ class ScheduleGrid(tk.Canvas):
         # Update scroll region
         self.config(scrollregion=(0, 0, total_width, total_height))
 
-    def _draw_slot(self, x, y, w, h, text, slot_key):
+    def _draw_slot(self, x, y, w, h, text, color, slot_key):
         # Background
         # Use thinner outline for internal slot separation
-        rect_id = self.create_rectangle(x, y, x+w, y+h, fill="white", outline="lightgray", tags=f"slot_{slot_key}")
+        rect_id = self.create_rectangle(x, y, x+w, y+h, fill=color, outline="lightgray", tags=f"slot_{slot_key}")
         # Text
         text_id = self.create_text(x+w//2, y+h//2, text=text, font=("Arial", 8), tags=f"text_{slot_key}")
 
-    def _get_group_name(self, group_id):
-        if not group_id: return ""
+    def _get_group_info(self, group_id):
+        if not group_id: return "", "white"
         for g in self.groups:
             if g.id == group_id:
-                return g.name
-        return "?"
+                return g.name, g.color
+        return "?", "white"
 
     def _get_slot_at(self, x, y) -> Optional[Tuple[int, int, int]]:
         grid_width = 7 * self.cell_width

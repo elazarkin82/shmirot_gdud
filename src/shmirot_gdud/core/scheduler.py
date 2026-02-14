@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Tuple
-from .models import Group, WeeklySchedule, ScheduleSlot, TimeWindow
+from .models import Group, WeeklySchedule, ScheduleSlot, TimeWindow, ScheduleRange
 import random
 import math
 
@@ -8,27 +8,54 @@ class Scheduler:
         self.groups = groups
         self.schedule = WeeklySchedule(week_start_date="2023-01-01") # Placeholder date
 
-    def generate_schedule(self) -> WeeklySchedule:
+    def generate_schedule(self, active_range: Optional[ScheduleRange] = None) -> WeeklySchedule:
         # Initialize empty schedule
         self.schedule.slots = []
+        self.schedule.active_range = active_range
         
         available_groups = [g for g in self.groups if g.validate()]
         if not available_groups:
             return self.schedule
 
+        # Determine active slots
+        time_slots = []
+        if active_range:
+            # Linearize time to hours from start of week (0 to 167)
+            start_linear = active_range.start_day * 24 + active_range.start_hour
+            end_linear = active_range.end_day * 24 + active_range.end_hour
+            
+            # Handle wrapping if end < start (e.g. Fri to Mon) - though UI might prevent this for simplicity
+            # Let's assume simple linear range for now within a week
+            
+            for t in range(start_linear, end_linear):
+                day = (t // 24) % 7
+                hour = t % 24
+                time_slots.append((day, hour))
+        else:
+            # Full week
+            for day in range(7):
+                for hour in range(24):
+                    time_slots.append((day, hour))
+
+        total_slots = len(time_slots) * 2 # 2 positions per slot
+        
+        # Calculate scaling factor for quotas
+        full_week_slots = 7 * 24 * 2
+        quota_scale = total_slots / full_week_slots if full_week_slots > 0 else 0
+
         # Calculate target quotas
-        total_slots = 7 * 24 * 2
         fixed_quota_groups = [g for g in available_groups if g.weekly_guard_quota is not None]
         proportional_groups = [g for g in available_groups if g.weekly_guard_quota is None and g.staffing_size is not None]
         
-        fixed_slots_needed = sum(g.weekly_guard_quota for g in fixed_quota_groups)
+        # Scale fixed quotas
+        fixed_slots_needed = sum(round(g.weekly_guard_quota * quota_scale) for g in fixed_quota_groups)
         remaining_slots = total_slots - fixed_slots_needed
         
         total_staffing = sum(g.staffing_size for g in proportional_groups)
         
         group_targets = {}
         for g in fixed_quota_groups:
-            group_targets[g.id] = g.weekly_guard_quota
+            group_targets[g.id] = round(g.weekly_guard_quota * quota_scale)
             
         if total_staffing > 0:
             for g in proportional_groups:
@@ -40,13 +67,10 @@ class Scheduler:
         diff = total_slots - current_total
         if diff != 0 and proportional_groups:
              group_targets[proportional_groups[0].id] += diff
+        elif diff != 0 and fixed_quota_groups:
+             # Fallback if no proportional groups
+             group_targets[fixed_quota_groups[0].id] += diff
 
-        # Create time slots (day, hour) to fill
-        time_slots = []
-        for day in range(7):
-            for hour in range(24):
-                time_slots.append((day, hour))
-        
         # Shuffle time slots to distribute "bad" hours fairly
         random.shuffle(time_slots)
         
@@ -173,7 +197,13 @@ class Scheduler:
                 slots_by_time[key] = []
             slots_by_time[key].append(group)
 
-        # Check quotas
+        # Check quotas (Scaled if partial week)
+        # We need to know if this schedule was generated with a range to validate quotas correctly
+        # But validation usually checks absolute numbers.
+        # If we want to validate against scaled quotas, we need to recalculate them here.
+        # For simplicity, let's skip strict quota validation if it's a partial schedule, 
+        # or just warn if it exceeds the FULL week quota (which is always an error).
+
         for group in self.groups:
             if group.weekly_guard_quota is not None:
                 count = group_counts.get(group.id, 0)

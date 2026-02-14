@@ -83,9 +83,17 @@ class ScheduleSlot:
     group_id: Optional[str] = None
 
 @dataclass
+class ScheduleRange:
+    start_day: int
+    start_hour: int
+    end_day: int
+    end_hour: int
+
+@dataclass
 class WeeklySchedule:
     week_start_date: str # ISO format YYYY-MM-DD
     slots: List[ScheduleSlot] = field(default_factory=list)
+    active_range: Optional[ScheduleRange] = None # If None, full week
 
     def get_slot(self, day: int, hour: int, position: int) -> Optional[ScheduleSlot]:
         for slot in self.slots:

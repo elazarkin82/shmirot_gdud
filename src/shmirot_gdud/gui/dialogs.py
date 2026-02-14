@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import List, Callable, Optional
-from shmirot_gdud.core.models import TimeWindow, Group
+from shmirot_gdud.core.models import TimeWindow, Group, ScheduleRange
 from shmirot_gdud.gui.utils import bidi_text
 
 class TimeWindowDialog(tk.Toplevel):
@@ -204,4 +204,90 @@ class GroupCreationDialog(tk.Toplevel):
             group.weekly_guard_quota = val
             
         self.on_create(group)
+        self.destroy()
+
+class GenerationSettingsDialog(tk.Toplevel):
+    def __init__(self, parent, on_generate: Callable[[Optional[ScheduleRange]], None]):
+        super().__init__(parent)
+        self.title(bidi_text("הגדרות יצירת סידור"))
+        self.geometry("400x350")
+        self.on_generate = on_generate
+        
+        self._create_ui()
+
+    def _create_ui(self):
+        main_frame = ttk.Frame(self, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Mode Selection
+        self.mode_var = tk.StringVar(value="full")
+        ttk.Radiobutton(main_frame, text=bidi_text("שבוע מלא (ראשון-שבת)"), variable=self.mode_var, value="full", command=self._toggle_range).pack(anchor=tk.E, pady=5)
+        ttk.Radiobutton(main_frame, text=bidi_text("טווח חלקי"), variable=self.mode_var, value="partial", command=self._toggle_range).pack(anchor=tk.E, pady=5)
+        
+        # Range Selection Frame
+        self.range_frame = ttk.LabelFrame(main_frame, text=bidi_text("בחירת טווח"), padding=10)
+        self.range_frame.pack(fill=tk.X, pady=10)
+        
+        days = [bidi_text(d) for d in ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]]
+        hours = [f"{h:02d}:00" for h in range(24)]
+        
+        # Start
+        ttk.Label(self.range_frame, text=bidi_text("התחלה:")).grid(row=0, column=2, sticky=tk.E, pady=5)
+        self.start_day_combo = ttk.Combobox(self.range_frame, values=days, width=10, justify="right", state="readonly")
+        self.start_day_combo.grid(row=0, column=1, padx=5)
+        self.start_day_combo.current(0)
+        
+        self.start_hour_combo = ttk.Combobox(self.range_frame, values=hours, width=8, justify="right", state="readonly")
+        self.start_hour_combo.grid(row=0, column=0, padx=5)
+        self.start_hour_combo.current(0)
+        
+        # End
+        ttk.Label(self.range_frame, text=bidi_text("סיום:")).grid(row=1, column=2, sticky=tk.E, pady=5)
+        self.end_day_combo = ttk.Combobox(self.range_frame, values=days, width=10, justify="right", state="readonly")
+        self.end_day_combo.grid(row=1, column=1, padx=5)
+        self.end_day_combo.current(6)
+        
+        self.end_hour_combo = ttk.Combobox(self.range_frame, values=hours, width=8, justify="right", state="readonly")
+        self.end_hour_combo.grid(row=1, column=0, padx=5)
+        self.end_hour_combo.current(23)
+        
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=20)
+        
+        ttk.Button(btn_frame, text=bidi_text("צור סידור"), command=self._generate).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_frame, text=bidi_text("ביטול"), command=self.destroy).pack(side=tk.LEFT, padx=5)
+        
+        self._toggle_range()
+
+    def _toggle_range(self):
+        if self.mode_var.get() == "partial":
+            for child in self.range_frame.winfo_children():
+                child.configure(state="normal")
+        else:
+            for child in self.range_frame.winfo_children():
+                child.configure(state="disabled")
+
+    def _generate(self):
+        if self.mode_var.get() == "full":
+            self.on_generate(None)
+        else:
+            days_display = [bidi_text(d) for d in ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]]
+            
+            start_day = days_display.index(self.start_day_combo.get())
+            start_hour = int(self.start_hour_combo.get().split(":")[0])
+            
+            end_day = days_display.index(self.end_day_combo.get())
+            end_hour = int(self.end_hour_combo.get().split(":")[0])
+            
+            # Validate
+            start_linear = start_day * 24 + start_hour
+            end_linear = end_day * 24 + end_hour
+            
+            if end_linear <= start_linear:
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text("זמן הסיום חייב להיות מאוחר מזמן ההתחלה"))
+                return
+                
+            self.on_generate(ScheduleRange(start_day, start_hour, end_day, end_hour))
+
         self.destroy()

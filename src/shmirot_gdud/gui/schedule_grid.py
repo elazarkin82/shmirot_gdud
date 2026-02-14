@@ -4,10 +4,10 @@ from shmirot_gdud.core.models import WeeklySchedule, Group
 from shmirot_gdud.gui.utils import bidi_text
 
 class ScheduleGrid(tk.Canvas):
-    def __init__(self, parent, groups: List[Group], on_change: Callable[[], None], **kwargs):
+    def __init__(self, parent, groups: List[Group], on_change: Callable[[], bool], **kwargs):
         super().__init__(parent, **kwargs)
         self.groups = groups
-        self.on_change = on_change
+        self.on_change = on_change # Now expects a boolean return value
         self.schedule: Optional[WeeklySchedule] = None
         
         self.cell_width = 140
@@ -173,9 +173,16 @@ class ScheduleGrid(tk.Canvas):
         id1 = s1.group_id if s1 else None
         id2 = s2.group_id if s2 else None
         
-        # Update model
+        # Update model temporarily
         self.schedule.set_slot(slot1[0], slot1[1], slot1[2], id2)
         self.schedule.set_slot(slot2[0], slot2[1], slot2[2], id1)
         
+        # Validate change via callback
+        is_valid = self.on_change()
+        
+        if not is_valid:
+            # Rollback
+            self.schedule.set_slot(slot1[0], slot1[1], slot1[2], id1)
+            self.schedule.set_slot(slot2[0], slot2[1], slot2[2], id2)
+        
         self.redraw()
-        self.on_change()

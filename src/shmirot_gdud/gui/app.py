@@ -359,9 +359,23 @@ class App:
         else:
             self._show_schedule()
 
-    def _on_schedule_change(self):
-        self._validate_and_show_errors()
+    def _on_schedule_change(self) -> bool:
+        # Validate the change
+        if not self.schedule: return False
+        
+        scheduler = Scheduler(self.groups)
+        scheduler.schedule = self.schedule
+        errors = scheduler.validate_schedule()
+        
+        if errors:
+             msg = "\n".join(errors[:10])
+             if len(errors) > 10:
+                 msg += "\n..."
+             messagebox.showwarning(bidi_text("שגיאה בשיבוץ"), bidi_text(msg))
+             return False # Invalid move
+        
         self._update_stats()
+        return True # Valid move
 
     def _validate_and_show_errors(self):
         if not self.schedule: return

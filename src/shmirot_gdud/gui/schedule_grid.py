@@ -19,7 +19,8 @@ class ScheduleGrid(tk.Canvas):
         
         # Drag state
         self.drag_start_slot: Optional[Tuple[int, int, int]] = None # day, hour, pos
-        self.drag_item_id = None
+        self.drag_ghost_rect = None
+        self.drag_ghost_text = None
         
         self.bind("<Button-1>", self._on_click)
         self.bind("<B1-Motion>", self._on_drag)
@@ -146,12 +147,47 @@ class ScheduleGrid(tk.Canvas):
         
         if slot:
             self.drag_start_slot = slot
-            # Visual feedback could be added here (highlight)
+            
+            # Create ghost visual
+            if self.schedule:
+                s = self.schedule.get_slot(*slot)
+                group_id = s.group_id if s else None
+                name, color = self._get_group_info(group_id)
+                
+                w = self.cell_width // 2
+                h = self.cell_height
+                
+                # Center ghost on mouse
+                x1 = x - w//2
+                y1 = y - h//2
+                x2 = x1 + w
+                y2 = y1 + h
+                
+                self.drag_ghost_rect = self.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", stipple="gray50", tags="ghost")
+                self.drag_ghost_text = self.create_text((x1+x2)//2, (y1+y2)//2, text=bidi_text(name), font=("Arial", 8), tags="ghost")
 
     def _on_drag(self, event):
-        pass # Could implement a floating label here
+        if self.drag_start_slot and self.drag_ghost_rect:
+            x = self.canvasx(event.x)
+            y = self.canvasy(event.y)
+            
+            w = self.cell_width // 2
+            h = self.cell_height
+            
+            x1 = x - w//2
+            y1 = y - h//2
+            x2 = x1 + w
+            y2 = y1 + h
+            
+            self.coords(self.drag_ghost_rect, x1, y1, x2, y2)
+            self.coords(self.drag_ghost_text, (x1+x2)//2, (y1+y2)//2)
 
     def _on_release(self, event):
+        # Remove ghost
+        self.delete("ghost")
+        self.drag_ghost_rect = None
+        self.drag_ghost_text = None
+
         if not self.drag_start_slot:
             return
             

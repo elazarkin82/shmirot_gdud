@@ -188,6 +188,10 @@ class App:
         
         ttk.Button(top_frame, text=bidi_text("חזור לתפריט ראשי"), command=self._show_main_menu).pack(side=tk.RIGHT)
         ttk.Button(top_frame, text=bidi_text("צור סידור עבודה"), command=self._open_generation_dialog).pack(side=tk.LEFT, padx=5)
+        
+        self.improve_btn = ttk.Button(top_frame, text=bidi_text("שפר סידור קיים"), command=self._improve_current_schedule, state="disabled")
+        self.improve_btn.pack(side=tk.LEFT, padx=5)
+        
         ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
 
         # Grid
@@ -208,6 +212,7 @@ class App:
         if self.schedule:
             self.schedule_grid.set_schedule(self.schedule)
             self._update_stats_content()
+            self.improve_btn.configure(state="normal")
 
     def _open_generation_dialog(self):
         if not self.groups:
@@ -218,6 +223,23 @@ class App:
             self._generate_schedule(active_range)
             
         GenerationSettingsDialog(self.root, on_generate)
+
+    def _improve_current_schedule(self):
+        if not self.schedule: return
+        
+        self.root.config(cursor="watch") # Changed from "wait" to "watch"
+        self.root.update()
+        
+        try:
+            scheduler = Scheduler(self.groups)
+            scheduler.schedule = self.schedule
+            self.schedule = scheduler.improve_schedule()
+            
+            self.schedule_grid.set_schedule(self.schedule)
+            self._update_stats_content()
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text("השיפור הושלם"))
+        finally:
+            self.root.config(cursor="")
 
     def _update_stats_content(self):
         if not self.schedule or not self.groups:
@@ -356,6 +378,7 @@ class App:
         if hasattr(self, 'schedule_grid'):
             self.schedule_grid.set_schedule(self.schedule)
             self._update_stats()
+            self.improve_btn.configure(state="normal")
         else:
             self._show_schedule()
 

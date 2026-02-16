@@ -25,6 +25,10 @@ class ScheduleGrid(tk.Canvas):
         self.bind("<Button-1>", self._on_click)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
+        
+        # Right click binding (Button-3 for Windows/Linux, Button-2 for Mac usually but Tkinter maps right click to 3 or 2 depending on OS)
+        # Standard is Button-3 for right click
+        self.bind("<Button-3>", self._on_right_click)
 
     def set_schedule(self, schedule: WeeklySchedule):
         self.schedule = schedule
@@ -187,7 +191,7 @@ class ScheduleGrid(tk.Canvas):
         self.delete("ghost")
         self.drag_ghost_rect = None
         self.drag_ghost_text = None
-
+        
         if not self.drag_start_slot:
             return
             
@@ -199,6 +203,47 @@ class ScheduleGrid(tk.Canvas):
             self._swap_slots(self.drag_start_slot, target_slot)
             
         self.drag_start_slot = None
+
+    def _on_right_click(self, event):
+        x = self.canvasx(event.x)
+        y = self.canvasy(event.y)
+        slot = self._get_slot_at(x, y)
+        
+        if not slot or not self.schedule:
+            return
+            
+        # Create popup menu
+        menu = tk.Menu(self, tearoff=0)
+        
+        # Add groups
+        for group in self.groups:
+            # Use lambda with default argument to capture group.id correctly in the loop
+            menu.add_command(label=bidi_text(group.name), command=lambda gid=group.id: self._replace_group_in_slot(slot, gid))
+            
+        # Use tk_popup instead of post for better behavior (auto-close on click outside)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _replace_group_in_slot(self, slot_key: Tuple[int, int, int], new_group_id: str):
+        if not self.schedule: return
+        
+        day, hour, pos = slot_key
+        current_slot = self.schedule.get_slot(day, hour, pos)
+        old_group_id = current_slot.group_id if current_slot else None
+        
+        if old_group_id == new_group_id:
+            return
+
+        # Update model
+        self.schedule.set_slot(day, hour, pos, new_group_id)
+        
+        # Validate
+        is_valid = self.on_change()
+        
+        if not is_valid:
+            # Rollback
+            self.schedule.set_slot(day, hour, pos, old_group_id)
+            
+        self.redraw()
 
     def _swap_slots(self, slot1, slot2):
         if not self.schedule: return

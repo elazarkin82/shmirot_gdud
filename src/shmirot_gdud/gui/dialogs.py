@@ -581,14 +581,14 @@ class AdvancedSettingsDialog(tk.Toplevel):
             self.entries[key] = var
             row += 1
 
-        add_field("בונוס זוגות (שלילי):", "SIMULTANEOUS_BONUS")
-        add_field("בונוס רצף לשעה (שלילי):", "CONSECUTIVE_BONUS_PER_HOUR")
+        add_field("בונוס זוגות (מוסיף לציון):", "SIMULTANEOUS_BONUS")
+        add_field("בונוס רצף לשעה (מוסיף לציון):", "CONSECUTIVE_BONUS_PER_HOUR")
         add_field("קנס חריגה מרצף (מקדם):", "CONSECUTIVE_PENALTY_MULTIPLIER")
         add_field("קנס חריגה מרצף (חזקה):", "CONSECUTIVE_PENALTY_EXPONENT")
-        add_field("קנס מנוחה:", "REST_PENALTY")
-        add_field("קנס חלון פעילות:", "ACTIVITY_WINDOW_PENALTY")
-        add_field("קנס שעה קשה:", "HARD_HOUR_PENALTY_BASE")
-        add_field("קנס פיזור (אותו יום):", "SAME_DAY_PENALTY")
+        add_field("קנס מנוחה (מפחית מהציון):", "REST_PENALTY")
+        add_field("קנס חלון פעילות (מפחית מהציון):", "ACTIVITY_WINDOW_PENALTY")
+        add_field("קנס שעה קשה (מפחית מהציון):", "HARD_HOUR_PENALTY_BASE")
+        add_field("קנס פיזור (מפחית מהציון):", "SAME_DAY_PENALTY")
         
         btn_frame = ttk.Frame(main_frame)
         btn_frame.grid(row=row, column=0, columnspan=2, pady=20)

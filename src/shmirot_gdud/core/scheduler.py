@@ -92,19 +92,20 @@ class ScheduleState:
                 if current_seq == 0 and last_active_idx != -999:
                     rest_time = idx - last_active_idx - 1
                     if rest_time < 6:
-                        score += (6 - rest_time) * config.REST_PENALTY
+                        # Penalty: Subtract from score
+                        score -= (6 - rest_time) * config.REST_PENALTY
                 
                 current_seq += 1
                 last_active_idx = idx
             else:
                 if current_seq > 0:
                     if current_seq <= max_consecutive:
-                        # Bonus for sequence
-                        score -= (current_seq * config.CONSECUTIVE_BONUS_PER_HOUR)
+                        # Bonus: Add to score
+                        score += (current_seq * config.CONSECUTIVE_BONUS_PER_HOUR)
                     else:
-                        # Penalty for exceeding limit
+                        # Penalty: Subtract from score
                         excess = current_seq - max_consecutive
-                        score += (excess ** config.CONSECUTIVE_PENALTY_EXPONENT) * config.CONSECUTIVE_PENALTY_MULTIPLIER
+                        score -= (excess ** config.CONSECUTIVE_PENALTY_EXPONENT) * config.CONSECUTIVE_PENALTY_MULTIPLIER
                     
                     current_seq = 0
                     
@@ -119,7 +120,8 @@ class ScheduleState:
             if s1 and s2 and s1.group_id and s2.group_id:
                 if s1.group_id != DISABLED_ID and s2.group_id != DISABLED_ID:
                     if s1.group_id == s2.group_id:
-                        score -= config.SIMULTANEOUS_BONUS
+                        # Bonus: Add to score
+                        score += config.SIMULTANEOUS_BONUS
         return score
 
 class Scheduler:
@@ -270,7 +272,8 @@ class Scheduler:
                     
                     total_delta = local_delta + consecutive_delta + sim_delta
                     
-                    if total_delta < 0:
+                    # Maximization: We want delta > 0 (Score increased)
+                    if total_delta > 0:
                         improved = True
                     else:
                         s1.group_id, s2.group_id = g1_id, g2_id
@@ -295,15 +298,17 @@ class Scheduler:
         
         other_s1 = self._get_other_slot_fast(s1)
         if other_s1:
-            if other_s1.group_id == old_g1_id: delta += config.SIMULTANEOUS_BONUS 
+            # Before: s1=g1. If other=g1, we had bonus. Now we lose it.
+            if other_s1.group_id == old_g1_id: delta -= config.SIMULTANEOUS_BONUS 
+            # After: s1=g2. If other=g2, we gain bonus.
             other_gid_after = old_g1_id if other_s1 == s2 else other_s1.group_id
-            if other_gid_after == old_g2_id: delta -= config.SIMULTANEOUS_BONUS 
+            if other_gid_after == old_g2_id: delta += config.SIMULTANEOUS_BONUS 
             
         if other_s1 != s2:
             other_s2 = self._get_other_slot_fast(s2)
             if other_s2:
-                if other_s2.group_id == old_g2_id: delta += config.SIMULTANEOUS_BONUS 
-                if other_s2.group_id == old_g1_id: delta -= config.SIMULTANEOUS_BONUS 
+                if other_s2.group_id == old_g2_id: delta -= config.SIMULTANEOUS_BONUS 
+                if other_s2.group_id == old_g1_id: delta += config.SIMULTANEOUS_BONUS 
                 
         return delta
 
@@ -333,19 +338,22 @@ class Scheduler:
         score = 0
         group = self._get_group(group_id)
         
+        # Activity Window Penalty
         if self._is_activity_window(group, slot.day_of_week, slot.hour):
-            score += config.ACTIVITY_WINDOW_PENALTY
+            score -= config.ACTIVITY_WINDOW_PENALTY
             
+        # Hard Hours Balance Penalty
         if hard_start <= slot.hour < hard_end:
             target = hard_targets.get(group_id, 1.0)
             if target > 0:
-                score += (100 / target) 
+                score -= (100 / target) 
             else:
-                score += config.HARD_HOUR_PENALTY_BASE
+                score -= config.HARD_HOUR_PENALTY_BASE
                 
+        # Distribution Penalty
         same_day_count = self._count_group_on_day(group.id, slot.date)
         if same_day_count > 2: 
-             score += (same_day_count - 2) * config.SAME_DAY_PENALTY
+             score -= (same_day_count - 2) * config.SAME_DAY_PENALTY
              
         return score
 
@@ -405,15 +413,16 @@ class Scheduler:
             target = targets.get(g.id, 0)
             if target > 0:
                 ratio = current_counts[g.id] / target
-                if ratio >= 1.0: score += 1000 
-                else: score += ratio * 100
-            else: score += 2000
+                if ratio >= 1.0: score -= 1000 # Penalty
+                else: score += (1.0 - ratio) * 100 # Bonus for being under target
+            else: score -= 2000
             
-            if self._is_activity_window(g, slot.day_of_week, slot.hour): score += 500
-            if other_group_id == g.id and g.can_guard_simultaneously: score -= 50
+            if self._is_activity_window(g, slot.day_of_week, slot.hour): score -= 500
+            if other_group_id == g.id and g.can_guard_simultaneously: score += 50
             candidates.append((score, g))
             
-        candidates.sort(key=lambda x: x[0])
+        # Sort descending (Higher score is better)
+        candidates.sort(key=lambda x: x[0], reverse=True)
         if candidates: return candidates[0][1]
         return None
 

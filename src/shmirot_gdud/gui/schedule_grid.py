@@ -10,26 +10,32 @@ class ScheduleGrid(tk.Canvas):
     def __init__(self, parent, groups: List[Group], on_change: Callable[[], bool], **kwargs):
         super().__init__(parent, **kwargs)
         self.groups = groups
-        self.on_change = on_change # Now expects a boolean return value
+        self.on_change = on_change 
         self.schedule: Optional[Schedule] = None
         
-        self.cell_width = 140
-        self.cell_height = 40
-        self.header_height = 30
-        self.sidebar_width = 60
+        # Base dimensions
+        self.base_cell_width = 140
+        self.base_cell_height = 40
+        self.base_header_height = 30
+        self.base_sidebar_width = 60
+        
+        # Current dimensions (will be scaled)
+        self.scale = 1.0
+        self.cell_width = self.base_cell_width
+        self.cell_height = self.base_cell_height
+        self.header_height = self.base_header_height
+        self.sidebar_width = self.base_sidebar_width
         
         self.days_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
         
         # Drag state
-        self.drag_start_slot: Optional[Tuple[str, int, int]] = None # date, hour, pos
+        self.drag_start_slot: Optional[Tuple[str, int, int]] = None 
         self.drag_ghost_rect = None
         self.drag_ghost_text = None
         
         self.bind("<Button-1>", self._on_click)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
-        
-        # Right click binding
         self.bind("<Button-3>", self._on_right_click)
 
     def set_schedule(self, schedule: Schedule):
@@ -39,6 +45,49 @@ class ScheduleGrid(tk.Canvas):
     def refresh_groups(self, groups: List[Group]):
         self.groups = groups
         self.redraw()
+
+    def zoom(self, factor: float):
+        """Zooms in or out by adding factor to current scale"""
+        new_scale = self.scale + factor
+        if new_scale < 0.2: new_scale = 0.2 # Minimum limit
+        if new_scale > 3.0: new_scale = 3.0 # Maximum limit
+        
+        self.scale = new_scale
+        self._update_dimensions()
+        self.redraw()
+
+    def fit_to_width(self):
+        """Adjusts scale so all columns fit within the current canvas width"""
+        if not self.schedule: return
+        
+        canvas_width = self.winfo_width()
+        if canvas_width <= 1: return # Not visible yet
+        
+        start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
+        num_days = (end_date - start_date).days + 1
+        
+        if num_days == 0: return
+
+        # Calculate available width for grid (total - sidebar)
+        # We need to solve: num_days * (base_width * scale) + (base_sidebar * scale) = canvas_width
+        # scale * (num_days * base_width + base_sidebar) = canvas_width
+        
+        total_base_content = (num_days * self.base_cell_width) + self.base_sidebar_width
+        new_scale = canvas_width / total_base_content
+        
+        # Apply limits
+        if new_scale < 0.2: new_scale = 0.2
+        
+        self.scale = new_scale
+        self._update_dimensions()
+        self.redraw()
+
+    def _update_dimensions(self):
+        self.cell_width = int(self.base_cell_width * self.scale)
+        self.cell_height = int(self.base_cell_height * self.scale)
+        self.header_height = int(self.base_header_height * self.scale)
+        self.sidebar_width = int(self.base_sidebar_width * self.scale)
 
     def redraw(self):
         self.delete("all")
@@ -62,9 +111,11 @@ class ScheduleGrid(tk.Canvas):
         # Sidebar background
         self.create_rectangle(sidebar_x, 0, total_width, total_height, fill="#f0f0f0", outline="")
         
+        font_size = max(6, int(8 * self.scale))
+        
         for h in range(24):
             y = self.header_height + h * self.cell_height
-            self.create_text(sidebar_x + self.sidebar_width//2, y + self.cell_height//2, text=f"{h:02d}:00")
+            self.create_text(sidebar_x + self.sidebar_width//2, y + self.cell_height//2, text=f"{h:02d}:00", font=("Arial", font_size))
 
         # Draw Headers
         current = start_date
@@ -81,7 +132,7 @@ class ScheduleGrid(tk.Canvas):
             day_name = self.days_names[our_wd]
             date_str = current.strftime("%d/%m")
             
-            self.create_text(x + self.cell_width//2, self.header_height//2, text=bidi_text(f"{day_name} {date_str}"))
+            self.create_text(x + self.cell_width//2, self.header_height//2, text=bidi_text(f"{day_name} {date_str}"), font=("Arial", font_size, "bold"))
             
             current += timedelta(days=1)
 
@@ -104,13 +155,13 @@ class ScheduleGrid(tk.Canvas):
                 s1 = slot_map.get((date_str, h, 1))
                 g1_id = s1.group_id if s1 else None
                 g1_name, g1_color = self._get_group_info(g1_id)
-                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (date_str, h, 1))
+                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (date_str, h, 1), font_size)
                 
                 # Position 2 (Left half)
                 s2 = slot_map.get((date_str, h, 2))
                 g2_id = s2.group_id if s2 else None
                 g2_name, g2_color = self._get_group_info(g2_id)
-                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (date_str, h, 2))
+                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (date_str, h, 2), font_size)
 
             current += timedelta(days=1)
 
@@ -128,17 +179,19 @@ class ScheduleGrid(tk.Canvas):
         # Update scroll region
         self.config(scrollregion=(0, 0, total_width, total_height))
 
-    def _draw_slot(self, x, y, w, h, text, color, slot_key):
+    def _draw_slot(self, x, y, w, h, text, color, slot_key, font_size):
         # Background
         rect_id = self.create_rectangle(x, y, x+w, y+h, fill=color, outline="lightgray", tags=f"slot_{slot_key}")
         # Text
-        text_id = self.create_text(x+w//2, y+h//2, text=text, font=("Arial", 8), tags=f"text_{slot_key}")
+        # Only draw text if cell is big enough
+        if h > 10 and w > 20:
+            text_id = self.create_text(x+w//2, y+h//2, text=text, font=("Arial", font_size), tags=f"text_{slot_key}")
 
     def _get_group_info(self, group_id):
         if not group_id: return "", "white"
         
         if group_id == DISABLED_ID:
-            return "---", "#555555" # Dark gray for disabled
+            return "---", "#555555" 
             
         for g in self.groups:
             if g.id == group_id:
@@ -196,8 +249,9 @@ class ScheduleGrid(tk.Canvas):
                 x2 = x1 + w
                 y2 = y1 + h
                 
+                font_size = max(6, int(8 * self.scale))
                 self.drag_ghost_rect = self.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", stipple="gray50", tags="ghost")
-                self.drag_ghost_text = self.create_text((x1+x2)//2, (y1+y2)//2, text=bidi_text(name), font=("Arial", 8), tags="ghost")
+                self.drag_ghost_text = self.create_text((x1+x2)//2, (y1+y2)//2, text=bidi_text(name), font=("Arial", font_size), tags="ghost")
 
     def _on_drag(self, event):
         if self.drag_start_slot and self.drag_ghost_rect:

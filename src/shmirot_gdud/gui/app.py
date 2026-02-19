@@ -218,6 +218,14 @@ class App:
         
         ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
 
+        # Zoom Controls
+        zoom_frame = ttk.Frame(top_frame)
+        zoom_frame.pack(side=tk.LEFT, padx=20)
+        ttk.Label(zoom_frame, text=bidi_text("זום:")).pack(side=tk.LEFT)
+        ttk.Button(zoom_frame, text="-", width=3, command=lambda: self.schedule_grid.zoom(-0.1)).pack(side=tk.LEFT)
+        ttk.Button(zoom_frame, text="+", width=3, command=lambda: self.schedule_grid.zoom(0.1)).pack(side=tk.LEFT)
+        ttk.Button(zoom_frame, text=bidi_text("התאם לרוחב"), command=lambda: self.schedule_grid.fit_to_width()).pack(side=tk.LEFT, padx=5)
+
         # Grid
         grid_frame = ttk.Frame(right_container)
         grid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)

@@ -1,6 +1,7 @@
 import tkinter as tk
 from typing import Optional, Tuple, Callable, List, Dict
-from shmirot_gdud.core.models import WeeklySchedule, Group
+from datetime import datetime, timedelta
+from shmirot_gdud.core.models import Schedule, Group, ScheduleSlot
 from shmirot_gdud.gui.utils import bidi_text
 
 class ScheduleGrid(tk.Canvas):
@@ -8,17 +9,17 @@ class ScheduleGrid(tk.Canvas):
         super().__init__(parent, **kwargs)
         self.groups = groups
         self.on_change = on_change # Now expects a boolean return value
-        self.schedule: Optional[WeeklySchedule] = None
+        self.schedule: Optional[Schedule] = None
         
         self.cell_width = 140
         self.cell_height = 40
         self.header_height = 30
         self.sidebar_width = 60
         
-        self.days = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+        self.days_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
         
         # Drag state
-        self.drag_start_slot: Optional[Tuple[int, int, int]] = None # day, hour, pos
+        self.drag_start_slot: Optional[Tuple[str, int, int]] = None # date, hour, pos
         self.drag_ghost_rect = None
         self.drag_ghost_text = None
         
@@ -26,11 +27,10 @@ class ScheduleGrid(tk.Canvas):
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
         
-        # Right click binding (Button-3 for Windows/Linux, Button-2 for Mac usually but Tkinter maps right click to 3 or 2 depending on OS)
-        # Standard is Button-3 for right click
+        # Right click binding
         self.bind("<Button-3>", self._on_right_click)
 
-    def set_schedule(self, schedule: WeeklySchedule):
+    def set_schedule(self, schedule: Schedule):
         self.schedule = schedule
         self.redraw()
 
@@ -45,7 +45,12 @@ class ScheduleGrid(tk.Canvas):
             self.create_text(self.winfo_width()//2, self.winfo_height()//2, text=bidi_text("לא נוצר סידור עבודה"))
             return
 
-        grid_width = 7 * self.cell_width
+        # Calculate date range
+        start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
+        num_days = (end_date - start_date).days + 1
+
+        grid_width = num_days * self.cell_width
         total_width = grid_width + self.sidebar_width
         total_height = self.header_height + 24 * self.cell_height
 
@@ -60,57 +65,71 @@ class ScheduleGrid(tk.Canvas):
             self.create_text(sidebar_x + self.sidebar_width//2, y + self.cell_height//2, text=f"{h:02d}:00")
 
         # Draw Headers
-        for d, day in enumerate(self.days):
-            # RTL: Sunday (0) is rightmost, Saturday (6) is leftmost
-            x = (6 - d) * self.cell_width
+        current = start_date
+        for d in range(num_days):
+            # RTL: First day is rightmost
+            x = (num_days - 1 - d) * self.cell_width
             
             # Header background
             self.create_rectangle(x, 0, x + self.cell_width, self.header_height, fill="#e0e0e0", outline="")
-            self.create_text(x + self.cell_width//2, self.header_height//2, text=bidi_text(day))
+
+            # Calculate day name
+            # Python weekday: Mon=0...Sun=6
+            # Our array: Sun=0...Sat=6
+            py_wd = current.weekday()
+            our_wd = (py_wd + 1) % 7
+            day_name = self.days_names[our_wd]
+            date_str = current.strftime("%d/%m")
+
+            self.create_text(x + self.cell_width//2, self.header_height//2, text=bidi_text(f"{day_name} {date_str}"))
+
+            current += timedelta(days=1)
 
         # Draw Grid Content
         slot_map = {}
         for slot in self.schedule.slots:
-            slot_map[(slot.day, slot.hour, slot.position)] = slot.group_id
+            slot_map[(slot.date, slot.hour, slot.position)] = slot
 
-        for d in range(7):
+        current = start_date
+        for d in range(num_days):
+            date_str = current.strftime("%Y-%m-%d")
+
             for h in range(24):
-                x = (6 - d) * self.cell_width
+                x = (num_days - 1 - d) * self.cell_width
                 y = self.header_height + h * self.cell_height
                 
                 half_width = self.cell_width // 2
                 
                 # Position 1 (Right half)
-                g1_id = slot_map.get((d, h, 1))
+                s1 = slot_map.get((date_str, h, 1))
+                g1_id = s1.group_id if s1 else None
                 g1_name, g1_color = self._get_group_info(g1_id)
-                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (d, h, 1))
+                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (date_str, h, 1))
                 
                 # Position 2 (Left half)
-                g2_id = slot_map.get((d, h, 2))
+                s2 = slot_map.get((date_str, h, 2))
+                g2_id = s2.group_id if s2 else None
                 g2_name, g2_color = self._get_group_info(g2_id)
-                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (d, h, 2))
+                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (date_str, h, 2))
 
-        # Draw Grid Lines (Overlay for thickness)
-        
-        # Horizontal lines (Hours) - Across Grid and Sidebar
-        for h in range(25): # 0 to 24 inclusive
+            current += timedelta(days=1)
+
+        # Draw Grid Lines
+        # Horizontal lines
+        for h in range(25):
             y = self.header_height + h * self.cell_height
-            self.create_line(0, y, total_width, y, fill="black", width=2)
+            self.create_line(0, y, total_width, y, fill="black", width=1)
 
-        # Vertical lines (Days) - Including Sidebar separator
-        for d in range(8): # 0 to 7 inclusive
+        # Vertical lines
+        for d in range(num_days + 1):
             x = d * self.cell_width
-            self.create_line(x, 0, x, total_height, fill="black", width=2)
+            self.create_line(x, 0, x, total_height, fill="black", width=1)
             
-        # Top border line
-        self.create_line(0, 0, total_width, 0, fill="black", width=2)
-
         # Update scroll region
         self.config(scrollregion=(0, 0, total_width, total_height))
 
     def _draw_slot(self, x, y, w, h, text, color, slot_key):
         # Background
-        # Use thinner outline for internal slot separation
         rect_id = self.create_rectangle(x, y, x+w, y+h, fill=color, outline="lightgray", tags=f"slot_{slot_key}")
         # Text
         text_id = self.create_text(x+w//2, y+h//2, text=text, font=("Arial", 8), tags=f"text_{slot_key}")
@@ -122,27 +141,33 @@ class ScheduleGrid(tk.Canvas):
                 return g.name, g.color
         return "?", "white"
 
-    def _get_slot_at(self, x, y) -> Optional[Tuple[int, int, int]]:
-        grid_width = 7 * self.cell_width
+    def _get_slot_at(self, x, y) -> Optional[Tuple[str, int, int]]:
+        if not self.schedule: return None
         
-        # Check if click is within grid area (not sidebar, not header)
+        start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
+        num_days = (end_date - start_date).days + 1
+
+        grid_width = num_days * self.cell_width
+
         if x >= grid_width or y < self.header_height:
             return None
             
         col = int(x // self.cell_width)
-        d = 6 - col # Reverse mapping for RTL
+        d_idx = num_days - 1 - col # Reverse mapping for RTL
         
+        if not (0 <= d_idx < num_days): return None
+        
+        target_date = start_date + timedelta(days=d_idx)
+        date_str = target_date.strftime("%Y-%m-%d")
+
         h = int((y - self.header_height) // self.cell_height)
-        
-        if not (0 <= d < 7 and 0 <= h < 24):
-            return None
+        if not (0 <= h < 24): return None
             
-        # Check if right or left half
         rel_x = x % self.cell_width
-        # If Pos 1 is Right half (x > half_width)
         pos = 1 if rel_x >= self.cell_width // 2 else 2
         
-        return (d, h, pos)
+        return (date_str, h, pos)
 
     def _on_click(self, event):
         x = self.canvasx(event.x)
@@ -187,7 +212,6 @@ class ScheduleGrid(tk.Canvas):
             self.coords(self.drag_ghost_text, (x1+x2)//2, (y1+y2)//2)
 
     def _on_release(self, event):
-        # Remove ghost
         self.delete("ghost")
         self.drag_ghost_rect = None
         self.drag_ghost_text = None
@@ -212,36 +236,36 @@ class ScheduleGrid(tk.Canvas):
         if not slot or not self.schedule:
             return
             
-        # Create popup menu
         menu = tk.Menu(self, tearoff=0)
         
-        # Add groups
+        # Add "Clear" option
+        menu.add_command(label=bidi_text("נקה משבצת"), command=lambda: self._replace_group_in_slot(slot, None))
+        menu.add_separator()
+
         for group in self.groups:
-            # Use lambda with default argument to capture group.id correctly in the loop
             menu.add_command(label=bidi_text(group.name), command=lambda gid=group.id: self._replace_group_in_slot(slot, gid))
             
-        # Use tk_popup instead of post for better behavior (auto-close on click outside)
         menu.tk_popup(event.x_root, event.y_root)
 
-    def _replace_group_in_slot(self, slot_key: Tuple[int, int, int], new_group_id: str):
+    def _replace_group_in_slot(self, slot_key: Tuple[str, int, int], new_group_id: Optional[str]):
         if not self.schedule: return
         
-        day, hour, pos = slot_key
-        current_slot = self.schedule.get_slot(day, hour, pos)
+        date_str, hour, pos = slot_key
+        current_slot = self.schedule.get_slot(date_str, hour, pos)
         old_group_id = current_slot.group_id if current_slot else None
         
         if old_group_id == new_group_id:
             return
 
         # Update model
-        self.schedule.set_slot(day, hour, pos, new_group_id)
+        self.schedule.set_slot(date_str, hour, pos, new_group_id, lock=True if new_group_id else False)
         
         # Validate
         is_valid = self.on_change()
         
         if not is_valid:
             # Rollback
-            self.schedule.set_slot(day, hour, pos, old_group_id)
+            self.schedule.set_slot(date_str, hour, pos, old_group_id)
             
         self.redraw()
 
@@ -255,8 +279,10 @@ class ScheduleGrid(tk.Canvas):
         id2 = s2.group_id if s2 else None
         
         # Update model temporarily
-        self.schedule.set_slot(slot1[0], slot1[1], slot1[2], id2)
-        self.schedule.set_slot(slot2[0], slot2[1], slot2[2], id1)
+        # If we swap manually, we lock the destination slots?
+        # Usually manual swap implies user intent, so let's lock them.
+        self.schedule.set_slot(slot1[0], slot1[1], slot1[2], id2, lock=True)
+        self.schedule.set_slot(slot2[0], slot2[1], slot2[2], id1, lock=True)
         
         # Validate change via callback
         is_valid = self.on_change()

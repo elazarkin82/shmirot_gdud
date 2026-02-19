@@ -4,10 +4,11 @@ import json
 from typing import List, Dict, Optional
 import pandas as pd
 from openpyxl.styles import PatternFill, Alignment
+from datetime import datetime, timedelta
 
-from shmirot_gdud.core.models import Group, TimeWindow, WeeklySchedule, ScheduleRange
+from shmirot_gdud.core.models import Group, TimeWindow, Schedule, ScheduleRange
 from shmirot_gdud.core.scheduler import Scheduler
-from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, GenerationSettingsDialog
+from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog
 from shmirot_gdud.gui.schedule_grid import ScheduleGrid
 from shmirot_gdud.gui.utils import bidi_text
 
@@ -18,7 +19,7 @@ class App:
         self.root.geometry("1400x800") # Increased width for stats panel
 
         self.groups: List[Group] = []
-        self.schedule: Optional[WeeklySchedule] = None
+        self.schedule: Optional[Schedule] = None
 
         self._create_menu()
         self._show_main_menu() # Start with main menu
@@ -68,7 +69,17 @@ class App:
 
     def _open_create_group_dialog(self):
         def on_create(group: Group):
-            group.id = str(len(self.groups) + 1) # Simple ID generation
+            # Fix ID generation to avoid duplicates after deletion
+            max_id = 0
+            for g in self.groups:
+                try:
+                    gid = int(g.id)
+                    if gid > max_id:
+                        max_id = gid
+                except ValueError:
+                    pass
+            group.id = str(max_id + 1)
+            
             self.groups.append(group)
             messagebox.showinfo(bidi_text("הצלחה"), bidi_text(f"הקבוצה {group.name} נוצרה בהצלחה"))
             
@@ -81,11 +92,6 @@ class App:
         main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         main_paned.pack(fill=tk.BOTH, expand=True)
 
-        # Right panel: Group List (Hebrew UI implies RTL, but Tkinter is LTR by default. 
-        # We'll put the list on the right for RTL feel or keep standard layout but translate text)
-        # Let's stick to standard layout but maybe swap sides if we want true RTL feel.
-        # For simplicity, let's keep list on left but align text right.
-        
         # Left panel: Group List
         left_frame = ttk.Frame(main_paned, width=300)
         main_paned.add(left_frame, weight=1)
@@ -149,7 +155,17 @@ class App:
 
     def _open_create_group_dialog_refresh(self):
         def on_create(group: Group):
-            group.id = str(len(self.groups) + 1)
+            # Fix ID generation to avoid duplicates after deletion
+            max_id = 0
+            for g in self.groups:
+                try:
+                    gid = int(g.id)
+                    if gid > max_id:
+                        max_id = gid
+                except ValueError:
+                    pass
+            group.id = str(max_id + 1)
+
             self.groups.append(group)
             self._refresh_group_list()
             
@@ -190,9 +206,14 @@ class App:
         top_frame.pack(fill=tk.X)
         
         ttk.Button(top_frame, text=bidi_text("חזור לתפריט ראשי"), command=self._show_main_menu).pack(side=tk.RIGHT)
-        ttk.Button(top_frame, text=bidi_text("צור סידור עבודה"), command=self._open_generation_dialog).pack(side=tk.LEFT, padx=5)
         
-        self.improve_btn = ttk.Button(top_frame, text=bidi_text("שפר סידור קיים"), command=self._improve_current_schedule, state="disabled")
+        # New Workflow Buttons
+        ttk.Button(top_frame, text=bidi_text("1. צור טבלה ריקה"), command=self._open_date_range_dialog).pack(side=tk.LEFT, padx=5)
+        
+        self.fill_btn = ttk.Button(top_frame, text=bidi_text("2. מלא אוטומטית"), command=self._fill_schedule, state="disabled")
+        self.fill_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.improve_btn = ttk.Button(top_frame, text=bidi_text("3. שפר סידור"), command=self._improve_current_schedule, state="disabled")
         self.improve_btn.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
@@ -215,22 +236,40 @@ class App:
         if self.schedule:
             self.schedule_grid.set_schedule(self.schedule)
             self._update_stats_content()
+            self.fill_btn.configure(state="normal")
             self.improve_btn.configure(state="normal")
 
-    def _open_generation_dialog(self):
-        if not self.groups:
-            messagebox.showwarning(bidi_text("אזהרה"), bidi_text("אין קבוצות מוגדרות"))
+    def _open_date_range_dialog(self):
+        def on_confirm(start_date: str, end_date: str):
+            self.schedule = Schedule.create_empty(start_date, end_date)
+            self.schedule_grid.set_schedule(self.schedule)
+            self._update_stats_content()
+            self.fill_btn.configure(state="normal")
+            self.improve_btn.configure(state="normal")
+            
+        DateRangeDialog(self.root, on_confirm)
+
+    def _fill_schedule(self):
+        if not self.schedule or not self.groups:
             return
             
-        def on_generate(active_range: Optional[ScheduleRange]):
-            self._generate_schedule(active_range)
+        self.root.config(cursor="watch")
+        self.root.update()
+        
+        try:
+            scheduler = Scheduler(self.groups)
+            self.schedule = scheduler.fill_schedule(self.schedule)
             
-        GenerationSettingsDialog(self.root, on_generate)
+            self.schedule_grid.set_schedule(self.schedule)
+            self._update_stats_content()
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text("השיבוץ הושלם"))
+        finally:
+            self.root.config(cursor="")
 
     def _improve_current_schedule(self):
         if not self.schedule: return
         
-        self.root.config(cursor="watch") # Changed from "wait" to "watch"
+        self.root.config(cursor="watch")
         self.root.update()
         
         try:
@@ -266,7 +305,6 @@ class App:
             self.stats_tree.insert("", tk.END, values=(bidi_text(g.name), staffing, count, f"{percent:.1f}%"))
 
     def _update_stats(self):
-        # Wrapper to call content update if tree exists
         if hasattr(self, 'stats_tree'):
             self._update_stats_content()
 
@@ -373,18 +411,6 @@ class App:
         self.constraints_list.delete(0, tk.END)
         self.activity_list.delete(0, tk.END)
 
-    def _generate_schedule(self, active_range: Optional[ScheduleRange] = None):
-        scheduler = Scheduler(self.groups)
-        self.schedule = scheduler.generate_schedule(active_range)
-        
-        self._validate_and_show_errors()
-        if hasattr(self, 'schedule_grid'):
-            self.schedule_grid.set_schedule(self.schedule)
-            self._update_stats()
-            self.improve_btn.configure(state="normal")
-        else:
-            self._show_schedule()
-
     def _on_schedule_change(self) -> bool:
         # Validate the change
         if not self.schedule: return False
@@ -435,7 +461,6 @@ class App:
                 
                 messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הקבוצות נטענו בהצלחה"))
                 
-                # If we are in group management screen, refresh
                 if hasattr(self, 'group_listbox'):
                     self._refresh_group_list()
                     self._clear_details()
@@ -468,20 +493,17 @@ class App:
                 with open(filename, 'r') as f:
                     data = json.load(f)
                 
-                # Load groups first
                 self.groups = []
                 for d in data.get("groups", []):
                     self.groups.append(Group.from_dict(d))
                 
-                # Load schedule
                 if "schedule" in data:
-                    self.schedule = WeeklySchedule.from_dict(data["schedule"])
+                    self.schedule = Schedule.from_dict(data["schedule"])
                 else:
                     self.schedule = None
                 
                 messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הסידור נטען בהצלחה"))
                 
-                # Refresh UI
                 self._show_schedule()
                 
             except Exception as e:
@@ -495,23 +517,38 @@ class App:
         filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
         if filename:
             schedule_data = []
-            days = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+            days_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+            
+            start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
+            end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
+            num_days = (end_date - start_date).days + 1
             
             slot_map = {}
             for slot in self.schedule.slots:
-                slot_map[(slot.day, slot.hour, slot.position)] = slot.group_id
+                slot_map[(slot.date, slot.hour, slot.position)] = slot.group_id
 
             for hour in range(24):
                 row = {"שעה": f"{hour:02d}:00 - {hour+1:02d}:00"}
-                for day_idx, day_name in enumerate(days):
-                    g1_id = slot_map.get((day_idx, hour, 1))
-                    g2_id = slot_map.get((day_idx, hour, 2))
+                
+                current = start_date
+                for d in range(num_days):
+                    date_str = current.strftime("%Y-%m-%d")
+                    py_wd = current.weekday()
+                    our_wd = (py_wd + 1) % 7
+                    day_name = days_names[our_wd]
+                    header = f"{day_name} {current.strftime('%d/%m')}"
+                    
+                    g1_id = slot_map.get((date_str, hour, 1))
+                    g2_id = slot_map.get((date_str, hour, 2))
                     
                     g1_name = next((g.name for g in self.groups if g.id == g1_id), "")
                     g2_name = next((g.name for g in self.groups if g.id == g2_id), "")
                     
-                    row[f"{day_name} עמדה 1"] = g1_name
-                    row[f"{day_name} עמדה 2"] = g2_name
+                    row[f"{header} עמדה 1"] = g1_name
+                    row[f"{header} עמדה 2"] = g2_name
+                    
+                    current += timedelta(days=1)
+                    
                 schedule_data.append(row)
 
             df_schedule = pd.DataFrame(schedule_data)
@@ -556,13 +593,10 @@ class App:
                 workbook = writer.book
                 ws = workbook['לוח שיבוץ']
                 
-                # Set RTL direction
                 ws.sheet_view.rightToLeft = True
                 
-                # Create color mapping
                 color_map = {g.name: g.color.replace("#", "") for g in self.groups}
                 
-                # Auto-adjust column widths
                 for column in ws.columns:
                     max_length = 0
                     column_letter = column[0].column_letter
@@ -575,7 +609,6 @@ class App:
                     adjusted_width = (max_length + 2) * 1.2
                     ws.column_dimensions[column_letter].width = adjusted_width
 
-                # Apply colors and alignment
                 for row in ws.iter_rows(min_row=2, min_col=2):
                     for cell in row:
                         cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -583,11 +616,9 @@ class App:
                             fill = PatternFill(start_color=color_map[cell.value], end_color=color_map[cell.value], fill_type="solid")
                             cell.fill = fill
                 
-                # Set RTL for other sheets too
                 workbook['קבוצות'].sheet_view.rightToLeft = True
                 workbook['סטטיסטיקות'].sheet_view.rightToLeft = True
                 
-                # Adjust widths for other sheets
                 for sheet_name in ['קבוצות', 'סטטיסטיקות']:
                     ws_other = workbook[sheet_name]
                     for column in ws_other.columns:

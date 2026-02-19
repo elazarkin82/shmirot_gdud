@@ -82,12 +82,46 @@ class ScheduleSlot:
     position: int # 1 or 2
     group_id: Optional[str] = None
 
+    def to_dict(self):
+        return {
+            "day": self.day,
+            "hour": self.hour,
+            "position": self.position,
+            "group_id": self.group_id
+        }
+
+    @staticmethod
+    def from_dict(data):
+        return ScheduleSlot(
+            day=data["day"],
+            hour=data["hour"],
+            position=data["position"],
+            group_id=data.get("group_id")
+        )
+
 @dataclass
 class ScheduleRange:
     start_day: int
     start_hour: int
     end_day: int
     end_hour: int
+
+    def to_dict(self):
+        return {
+            "start_day": self.start_day,
+            "start_hour": self.start_hour,
+            "end_day": self.end_day,
+            "end_hour": self.end_hour
+        }
+
+    @staticmethod
+    def from_dict(data):
+        return ScheduleRange(
+            start_day=data["start_day"],
+            start_hour=data["start_hour"],
+            end_day=data["end_day"],
+            end_hour=data["end_hour"]
+        )
 
 @dataclass
 class WeeklySchedule:
@@ -107,3 +141,20 @@ class WeeklySchedule:
             slot.group_id = group_id
         else:
             self.slots.append(ScheduleSlot(day, hour, position, group_id))
+
+    def to_dict(self):
+        return {
+            "week_start_date": self.week_start_date,
+            "slots": [s.to_dict() for s in self.slots],
+            "active_range": self.active_range.to_dict() if self.active_range else None
+        }
+
+    @staticmethod
+    def from_dict(data):
+        schedule = WeeklySchedule(
+            week_start_date=data.get("week_start_date", "2023-01-01"),
+            slots=[ScheduleSlot.from_dict(s) for s in data.get("slots", [])]
+        )
+        if data.get("active_range"):
+            schedule.active_range = ScheduleRange.from_dict(data["active_range"])
+        return schedule

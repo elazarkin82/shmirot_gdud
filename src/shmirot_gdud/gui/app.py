@@ -30,6 +30,9 @@ class App:
         file_menu.add_command(label=bidi_text("טען קבוצות"), command=self._load_groups)
         file_menu.add_command(label=bidi_text("שמור קבוצות"), command=self._save_groups)
         file_menu.add_separator()
+        file_menu.add_command(label=bidi_text("טען סידור עבודה"), command=self._load_schedule)
+        file_menu.add_command(label=bidi_text("שמור סידור עבודה"), command=self._save_schedule)
+        file_menu.add_separator()
         file_menu.add_command(label=bidi_text("ייצוא לאקסל"), command=self._export_excel)
         file_menu.add_separator()
         file_menu.add_command(label=bidi_text("יציאה"), command=self.root.quit)
@@ -439,6 +442,50 @@ class App:
                     
             except Exception as e:
                 messagebox.showerror(bidi_text("שגיאה"), bidi_text(f"נכשל בטעינת הקבוצות: {e}"))
+
+    def _save_schedule(self):
+        if not self.schedule:
+            messagebox.showwarning(bidi_text("אזהרה"), bidi_text("אין סידור עבודה לשמירה"))
+            return
+            
+        filename = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        if filename:
+            try:
+                data = {
+                    "groups": [g.to_dict() for g in self.groups],
+                    "schedule": self.schedule.to_dict()
+                }
+                with open(filename, 'w') as f:
+                    json.dump(data, f, indent=2)
+                messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הסידור נשמר בהצלחה"))
+            except Exception as e:
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text(f"נכשל בשמירת הסידור: {e}"))
+
+    def _load_schedule(self):
+        filename = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+        if filename:
+            try:
+                with open(filename, 'r') as f:
+                    data = json.load(f)
+                
+                # Load groups first
+                self.groups = []
+                for d in data.get("groups", []):
+                    self.groups.append(Group.from_dict(d))
+                
+                # Load schedule
+                if "schedule" in data:
+                    self.schedule = WeeklySchedule.from_dict(data["schedule"])
+                else:
+                    self.schedule = None
+                
+                messagebox.showinfo(bidi_text("הצלחה"), bidi_text("הסידור נטען בהצלחה"))
+                
+                # Refresh UI
+                self._show_schedule()
+                
+            except Exception as e:
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text(f"נכשל בטעינת הסידור: {e}"))
 
     def _export_excel(self):
         if not self.schedule:

@@ -73,6 +73,14 @@ class Group:
     can_guard_simultaneously: bool = True
     color: str = field(default_factory=generate_pastel_color)
     
+    def __hash__(self):
+        return hash(self.id)
+
+    def __eq__(self, other):
+        if not isinstance(other, Group):
+            return False
+        return self.id == other.id
+
     def validate(self) -> bool:
         return self.staffing_size is not None or self.weekly_guard_quota is not None
 

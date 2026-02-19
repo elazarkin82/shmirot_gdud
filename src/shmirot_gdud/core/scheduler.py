@@ -1,8 +1,129 @@
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable, Set
 from .models import Group, Schedule, ScheduleSlot, TimeWindow
 import random
 import math
+import time
 from datetime import datetime, timedelta
+
+DISABLED_ID = "DISABLED"
+
+class ScheduleState:
+    """
+    Helper class to track the state of the schedule efficiently for scoring.
+    """
+    def __init__(self, schedule: Schedule, groups: List[Group], hard_start: int, hard_end: int):
+        self.schedule = schedule
+        self.groups = {g.id: g for g in groups}
+        self.hard_start = hard_start
+        self.hard_end = hard_end
+        
+        # Fast lookup
+        self.slot_map: Dict[Tuple[str, int, int], ScheduleSlot] = {}
+        for s in schedule.slots:
+            self.slot_map[(s.date, s.hour, s.position)] = s
+            
+        # Pre-calculate chronological order of slots
+        start_date = datetime.strptime(schedule.start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(schedule.end_date, "%Y-%m-%d")
+        self.time_points = []
+        curr = start_date
+        while curr <= end_date:
+            d_str = curr.strftime("%Y-%m-%d")
+            for h in range(24):
+                self.time_points.append((d_str, h))
+            curr += timedelta(days=1)
+            
+        self.time_to_index = {t: i for i, t in enumerate(self.time_points)}
+        
+        # Initialize counters
+        self.group_hard_hours = {g_id: 0 for g_id in self.groups}
+        self.group_daily_counts = {} # (g_id, date) -> count
+        
+        # Calculate initial state
+        for s in schedule.slots:
+            if not s.group_id or s.group_id == DISABLED_ID: continue
+            self._add_to_state(s)
+
+    def _add_to_state(self, slot: ScheduleSlot):
+        gid = slot.group_id
+        if not gid or gid == DISABLED_ID: return
+        
+        # Hard hours
+        if self.hard_start <= slot.hour < self.hard_end:
+            if gid in self.group_hard_hours:
+                self.group_hard_hours[gid] += 1
+            
+        # Daily counts
+        key = (gid, slot.date)
+        self.group_daily_counts[key] = self.group_daily_counts.get(key, 0) + 1
+
+    def get_group_consecutive_score(self, group_id: str) -> float:
+        if group_id == DISABLED_ID: return 0
+        
+        group = self.groups.get(group_id)
+        if not group: return 0
+        
+        score = 0
+        max_consecutive = group.staffing_size if group.staffing_size else 4
+        if max_consecutive < 2: max_consecutive = 2
+        
+        current_seq = 0
+        last_active_idx = -999
+        
+        for idx, (date_str, hour) in enumerate(self.time_points):
+            is_active = False
+            for pos in [1, 2]:
+                s = self.slot_map.get((date_str, hour, pos))
+                if s and s.group_id == group_id:
+                    is_active = True
+                    break
+            
+            # Check activity window conflict
+            s_ref = self.slot_map.get((date_str, hour, 1))
+            day_of_week = s_ref.day_of_week if s_ref else 0
+            
+            for rule in group.primary_activity_windows:
+                if rule.day == day_of_week and rule.start_hour <= hour < rule.end_hour:
+                    is_active = True
+                    break
+            
+            if is_active:
+                if current_seq == 0 and last_active_idx != -999:
+                    rest_time = idx - last_active_idx - 1
+                    if rest_time < 6:
+                        score += (6 - rest_time) * 1000
+                
+                current_seq += 1
+                last_active_idx = idx
+            else:
+                if current_seq > 0:
+                    if current_seq <= max_consecutive:
+                        # Bonus for sequence
+                        score -= (current_seq * 50)
+                    else:
+                        # Penalty for exceeding limit
+                        excess = current_seq - max_consecutive
+                        score += (excess ** 2) * 500
+                    
+                    current_seq = 0
+                    
+        return score
+
+    def get_simultaneous_score(self) -> float:
+        """
+        Calculates global score for simultaneous guarding (same group in both positions).
+        """
+        score = 0
+        for date_str, hour in self.time_points:
+            s1 = self.slot_map.get((date_str, hour, 1))
+            s2 = self.slot_map.get((date_str, hour, 2))
+            
+            if s1 and s2 and s1.group_id and s2.group_id:
+                if s1.group_id != DISABLED_ID and s2.group_id != DISABLED_ID:
+                    if s1.group_id == s2.group_id:
+                        # Big bonus for same group
+                        score -= 500 
+        return score
 
 class Scheduler:
     def __init__(self, groups: List[Group]):
@@ -16,28 +137,14 @@ class Scheduler:
         if not available_groups:
             return self.schedule
 
-        # Identify empty slots to fill
         empty_slots = [s for s in self.schedule.slots if s.group_id is None]
-        filled_slots = [s for s in self.schedule.slots if s.group_id is not None]
+        filled_slots = [s for s in self.schedule.slots if s.group_id is not None and s.group_id != DISABLED_ID]
         
         if not empty_slots:
             return self.schedule
 
         total_slots_to_fill = len(empty_slots)
-        total_slots_in_range = len(self.schedule.slots)
         
-        # Calculate quotas
-        # We need to distribute the remaining work among groups based on their definitions
-        # taking into account what they already have in filled_slots.
-        
-        # 1. Calculate current load from pre-filled slots
-        current_counts = {g.id: 0 for g in available_groups}
-        for s in filled_slots:
-            if s.group_id in current_counts:
-                current_counts[s.group_id] += 1
-
-        # 2. Calculate target total load for the entire period
-        # The period length in weeks
         start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
         end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
         days_diff = (end_date - start_date).days + 1
@@ -46,55 +153,43 @@ class Scheduler:
         fixed_quota_groups = [g for g in available_groups if g.weekly_guard_quota is not None]
         proportional_groups = [g for g in available_groups if g.weekly_guard_quota is None and g.staffing_size is not None]
         
+        current_counts = {g.id: 0 for g in available_groups}
+        for s in filled_slots:
+            if s.group_id in current_counts:
+                current_counts[s.group_id] += 1
+        
         group_targets = {}
         
-        # Fixed quotas scaled by time period
         fixed_slots_needed = 0
         for g in fixed_quota_groups:
             target = round(g.weekly_guard_quota * weeks_ratio)
             group_targets[g.id] = target
-            fixed_slots_needed += max(0, target - current_counts[g.id]) # Only count what's left to fill
+            fixed_slots_needed += max(0, target - current_counts[g.id])
             
-        # Remaining slots for proportional groups
         remaining_slots_for_prop = total_slots_to_fill - fixed_slots_needed
         
         total_staffing = sum(g.staffing_size for g in proportional_groups)
         
         if total_staffing > 0:
             for g in proportional_groups:
-                # Calculate share of the REMAINING work
                 share = (g.staffing_size / total_staffing) * remaining_slots_for_prop
-                # Add current count to get total target
                 group_targets[g.id] = current_counts[g.id] + round(share)
-        
-        # Adjust rounding errors to match total slots available
-        current_target_sum = sum(group_targets.values())
-        # We want the sum of targets to equal total slots in range (filled + empty)
-        # But actually we just need to make sure we fill the empty slots.
-        # Let's adjust targets so sum(target - current) == len(empty_slots)
         
         needed_sum = sum(max(0, group_targets.get(g.id, 0) - current_counts.get(g.id, 0)) for g in available_groups)
         diff = total_slots_to_fill - needed_sum
         
         if diff != 0:
-            # Distribute diff to proportional groups first
             if proportional_groups:
                 group_targets[proportional_groups[0].id] += diff
             elif fixed_quota_groups:
                 group_targets[fixed_quota_groups[0].id] += diff
 
-        # Sort empty slots by time to fill sequentially (or shuffle for randomness)
-        # Shuffling is better to distribute "bad" hours
         random.shuffle(empty_slots)
         
-        # Fill slots
         for slot in empty_slots:
-            # Try to fill
-            # We need to know the other slot in the same hour for simultaneous check
             other_slot = self._get_other_slot(slot)
-            other_group_id = other_slot.group_id if other_slot else None
+            other_group_id = other_slot.group_id if other_slot and other_slot.group_id != DISABLED_ID else None
             
-            # Select best group
             selected_group = self._select_best_group(
                 slot, 
                 available_groups, 
@@ -107,80 +202,244 @@ class Scheduler:
                 slot.group_id = selected_group.id
                 current_counts[selected_group.id] += 1
                 
-        # Run improvement
-        self.improve_schedule()
-        
         return self.schedule
 
-    def improve_schedule(self) -> Schedule:
+    def improve_schedule(self, hard_start: int = 2, hard_end: int = 6, progress_callback: Optional[Callable[[float], None]] = None) -> Schedule:
+        print("Starting improve_schedule...")
+        start_time = time.time()
+        
         if not self.schedule or not self.schedule.slots:
             return self.schedule
             
-        iterations = 2000
-        
-        mutable_slots = [s for s in self.schedule.slots if not s.is_locked]
+        mutable_slots = [s for s in self.schedule.slots if not s.is_locked and s.group_id != DISABLED_ID]
         if len(mutable_slots) < 2:
             return self.schedule
 
-        current_score = self._calculate_schedule_score()
-        
-        for _ in range(iterations):
-            # Pick two random mutable slots
-            s1 = random.choice(mutable_slots)
-            s2 = random.choice(mutable_slots)
-            
-            if s1 == s2: continue
-            
-            # Try swap
-            if self._try_swap(s1, s2, current_score):
-                # Swap successful, score updated implicitly (or we could track it)
-                pass
+        # Optimization: Create a fast lookup map for slots
+        self.slot_map = {}
+        for s in self.schedule.slots:
+            self.slot_map[(s.date, s.hour, s.position)] = s
+
+        total_hard_slots = 0
+        for s in self.schedule.slots:
+            if hard_start <= s.hour < hard_end:
+                total_hard_slots += 1
                 
+        available_groups = [g for g in self.groups if g.validate()]
+        hard_targets = self._calculate_hard_targets(available_groups, total_hard_slots)
+
+        # Initialize State
+        state = ScheduleState(self.schedule, self.groups, hard_start, hard_end)
+        
+        max_passes = 5
+        n = len(mutable_slots)
+        print(f"Mutable slots: {n}, Max passes: {max_passes}")
+        
+        for pass_num in range(max_passes):
+            print(f"--- Pass {pass_num + 1}/{max_passes} ---")
+            improved = False
+            
+            # Phase 1: Single Swaps
+            for i in range(n):
+                if i % 20 == 0 and progress_callback:
+                    p = (pass_num + (i / n) * 0.5) / max_passes * 100
+                    progress_callback(p)
+
+                for j in range(i + 1, n):
+                    s1 = mutable_slots[i]
+                    s2 = mutable_slots[j]
+                    
+                    if s1.group_id == s2.group_id: continue
+                    
+                    g1_id = s1.group_id
+                    g2_id = s2.group_id
+                    
+                    if not self._is_swap_valid(s1, self._get_group(g1_id), s2, self._get_group(g2_id)):
+                        continue
+
+                    # Calculate Score Delta
+                    # 1. Consecutive Score Delta
+                    score_g1_before = state.get_group_consecutive_score(g1_id)
+                    score_g2_before = state.get_group_consecutive_score(g2_id)
+                    
+                    # 2. Simultaneous Score Delta (Local)
+                    sim_delta = self._calculate_simultaneous_delta(s1, s2, g1_id, g2_id)
+                    
+                    # Perform tentative swap in memory
+                    s1.group_id, s2.group_id = g2_id, g1_id
+                    
+                    # After swap
+                    score_g1_after = state.get_group_consecutive_score(g1_id)
+                    score_g2_after = state.get_group_consecutive_score(g2_id)
+                    
+                    # 3. Other Local Scores (Hard Hours, Activity)
+                    local_delta = self._calculate_simple_local_delta(s1, s2, g1_id, g2_id, hard_start, hard_end, hard_targets)
+                    
+                    consecutive_delta = (score_g1_after + score_g2_after) - (score_g1_before + score_g2_before)
+                    
+                    total_delta = local_delta + consecutive_delta + sim_delta
+                    
+                    if total_delta < 0:
+                        # Keep swap
+                        improved = True
+                    else:
+                        # Revert
+                        s1.group_id, s2.group_id = g1_id, g2_id
+            
+            if not improved:
+                print("No improvement in this pass, stopping early.")
+                break
+        
+        if progress_callback:
+            progress_callback(100)
+            
+        total_time = time.time() - start_time
+        print(f"Finished improve_schedule in {total_time:.2f}s.")
+        
+        if hasattr(self, 'slot_map'):
+            del self.slot_map
+            
         return self.schedule
 
-    def _try_swap(self, s1: ScheduleSlot, s2: ScheduleSlot, current_score: float) -> bool:
-        g1_id = s1.group_id
-        g2_id = s2.group_id
+    def _calculate_simultaneous_delta(self, s1: ScheduleSlot, s2: ScheduleSlot, old_g1_id: str, old_g2_id: str) -> float:
+        """
+        Calculates the change in simultaneous score if s1 and s2 swap groups.
+        s1 currently has old_g1_id, s2 has old_g2_id.
+        After swap: s1 has old_g2_id, s2 has old_g1_id.
+        """
+        delta = 0
         
-        if g1_id == g2_id: return False
-        
-        g1 = self._get_group(g1_id)
-        g2 = self._get_group(g2_id)
-        
-        # Check validity
-        if not self._is_swap_valid(s1, g1, s2, g2):
-            return False
+        # Check s1 location
+        other_s1 = self._get_other_slot_fast(s1)
+        if other_s1:
+            # Before: s1=g1, other=?
+            if other_s1.group_id == old_g1_id: delta += 500 # Lost bonus
+            # After: s1=g2, other=?
+            # Note: if other_s1 IS s2, then other's group also changes!
+            other_gid_after = old_g1_id if other_s1 == s2 else other_s1.group_id
+            if other_gid_after == old_g2_id: delta -= 500 # Gained bonus
             
-        # Calculate local score delta
-        score_before = self._calculate_local_score(s1, g1) + self._calculate_local_score(s2, g2)
+        # Check s2 location
+        # If s1 and s2 are in same hour, we already handled the pair in s1 check (other_s1 == s2).
+        # We should avoid double counting.
+        if other_s1 != s2:
+            other_s2 = self._get_other_slot_fast(s2)
+            if other_s2:
+                # Before: s2=g2, other=?
+                if other_s2.group_id == old_g2_id: delta += 500 # Lost bonus
+                # After: s2=g1, other=?
+                # other_s2 cannot be s1 here because we checked other_s1 != s2
+                if other_s2.group_id == old_g1_id: delta -= 500 # Gained bonus
+                
+        return delta
+
+    def _calculate_hard_targets(self, groups: List[Group], total_hard_slots: int) -> Dict[str, float]:
+        targets = {}
+        total_weight = 0
+        for g in groups:
+            w = g.staffing_size if g.staffing_size else (g.weekly_guard_quota if g.weekly_guard_quota else 1)
+            total_weight += w
+        if total_weight == 0: return {}
+        for g in groups:
+            w = g.staffing_size if g.staffing_size else (g.weekly_guard_quota if g.weekly_guard_quota else 1)
+            targets[g.id] = (w / total_weight) * total_hard_slots
+        return targets
+
+    def _calculate_swap_delta(self, s1: ScheduleSlot, s2: ScheduleSlot, hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
+        # This method is now redundant as logic moved inside loop for efficiency with state
+        return 0
+
+    def _calculate_block_swap_delta(self, block1: List[ScheduleSlot], block2: List[ScheduleSlot], hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
+        # Placeholder if we re-enable block swaps
+        return 0
+
+    def _perform_swap(self, s1: ScheduleSlot, s2: ScheduleSlot):
+        s1.group_id, s2.group_id = s2.group_id, s1.group_id
+
+    def _perform_block_swap(self, block1: List[ScheduleSlot], block2: List[ScheduleSlot]):
+        for k in range(len(block1)):
+            self._perform_swap(block1[k], block2[k])
+
+    def _calculate_simple_local_delta(self, s1: ScheduleSlot, s2: ScheduleSlot, old_g1_id: str, old_g2_id: str, hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
+        # s1 now has old_g2_id, s2 now has old_g1_id
+        # Calculate score for s1 with new group (g2)
+        score_s1_new = self._get_single_slot_score(s1, old_g2_id, hard_start, hard_end, hard_targets)
+        # Calculate score for s1 with old group (g1)
+        score_s1_old = self._get_single_slot_score(s1, old_g1_id, hard_start, hard_end, hard_targets)
         
-        # Swap
-        s1.group_id = g2_id
-        s2.group_id = g1_id
+        # Calculate score for s2 with new group (g1)
+        score_s2_new = self._get_single_slot_score(s2, old_g1_id, hard_start, hard_end, hard_targets)
+        # Calculate score for s2 with old group (g2)
+        score_s2_old = self._get_single_slot_score(s2, old_g2_id, hard_start, hard_end, hard_targets)
         
-        score_after = self._calculate_local_score(s1, g2) + self._calculate_local_score(s2, g1)
+        return (score_s1_new + score_s2_new) - (score_s1_old + score_s2_old)
+
+    def _get_single_slot_score(self, slot: ScheduleSlot, group_id: str, hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
+        if not group_id: return 0
+        score = 0
+        group = self._get_group(group_id)
         
-        if score_after < score_before:
-            return True # Keep swap
-        else:
-            # Revert
-            s1.group_id = g1_id
-            s2.group_id = g2_id
-            return False
+        # Activity Window
+        if self._is_activity_window(group, slot.day_of_week, slot.hour):
+            score += 1000
+            
+        # Hard Hours Balance (Simple penalty for being in hard hour)
+        if hard_start <= slot.hour < hard_end:
+            target = hard_targets.get(group_id, 1.0)
+            if target > 0:
+                score += (100 / target) 
+            else:
+                score += 200 
+                
+        # Distribution (Same day count)
+        # This is expensive to calc here, maybe skip or approximate?
+        # Let's skip for speed in this delta function, consecutive score handles clustering mostly.
+        
+        return score
+
+    def _get_local_score(self, slot: ScheduleSlot, group: Optional[Group], hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
+        # Legacy method, replaced by _get_single_slot_score
+        return 0
+
+    def _has_consecutive_conflict(self, slot: ScheduleSlot, group: Group) -> bool:
+        # Legacy method, replaced by state.get_group_consecutive_score
+        return False
+
+    def _count_group_on_day(self, group_id: str, date_str: str) -> int:
+        count = 0
+        for h in range(24):
+            for pos in [1, 2]:
+                s = self._get_slot_fast(date_str, h, pos)
+                if s and s.group_id == group_id:
+                    count += 1
+        return count
+
+    def _get_slot_fast(self, date: str, hour: int, position: int) -> Optional[ScheduleSlot]:
+        if hasattr(self, 'slot_map'):
+            return self.slot_map.get((date, hour, position))
+        return self.schedule.get_slot(date, hour, position)
+        
+    def _get_other_slot_fast(self, slot: ScheduleSlot) -> Optional[ScheduleSlot]:
+        other_pos = 2 if slot.position == 1 else 1
+        return self._get_slot_fast(slot.date, slot.hour, other_pos)
 
     def _is_swap_valid(self, s1: ScheduleSlot, g1: Optional[Group], s2: ScheduleSlot, g2: Optional[Group]) -> bool:
-        # Check availability
         if g1 and not self._is_group_available(g1, s2.day_of_week, s2.hour, s2.date): return False
         if g2 and not self._is_group_available(g2, s1.day_of_week, s1.hour, s1.date): return False
         
-        # Check simultaneous
         if g1:
-            other_s2 = self._get_other_slot(s2)
-            if other_s2 and other_s2.group_id == g1.id and not g1.can_guard_simultaneously: return False
+            other_s2 = self._get_other_slot_fast(s2)
+            other_gid = other_s2.group_id if other_s2 else None
+            if other_s2 == s1: other_gid = g2.id if g2 else None 
+            
+            if other_gid == g1.id and not g1.can_guard_simultaneously: return False
             
         if g2:
-            other_s1 = self._get_other_slot(s1)
-            if other_s1 and other_s1.group_id == g2.id and not g2.can_guard_simultaneously: return False
+            other_s1 = self._get_other_slot_fast(s1)
+            other_gid = other_s1.group_id if other_s1 else None
+            if other_s1 == s2: other_gid = g1.id if g1 else None 
+            
+            if other_gid == g2.id and not g2.can_guard_simultaneously: return False
             
         return True
 
@@ -189,127 +448,66 @@ class Scheduler:
         return self.schedule.get_slot(slot.date, slot.hour, other_pos)
 
     def _get_group(self, group_id: Optional[str]) -> Optional[Group]:
-        if not group_id: return None
+        if not group_id or group_id == DISABLED_ID: return None
         return next((g for g in self.groups if g.id == group_id), None)
 
     def _select_best_group(self, slot: ScheduleSlot, groups: List[Group], current_counts: Dict[str, int], targets: Dict[str, int], other_group_id: Optional[str]) -> Optional[Group]:
         candidates = []
-        
         for g in groups:
-            # Hard constraint: Availability
-            if not self._is_group_available(g, slot.day_of_week, slot.hour, slot.date):
-                continue
+            if not self._is_group_available(g, slot.day_of_week, slot.hour, slot.date): continue
+            if other_group_id == g.id and not g.can_guard_simultaneously: continue
             
-            # Hard constraint: Simultaneous
-            if other_group_id == g.id and not g.can_guard_simultaneously:
-                continue
-                
             score = 0
-            
-            # Quota progress
             target = targets.get(g.id, 0)
             if target > 0:
                 ratio = current_counts[g.id] / target
-                if ratio >= 1.0:
-                    score += 1000 # Penalty for exceeding
-                else:
-                    score += ratio * 100
-            else:
-                score += 2000
-                
-            # Activity window
-            if self._is_activity_window(g, slot.day_of_week, slot.hour):
-                score += 500
-                
-            # Preference for simultaneous if allowed
-            if other_group_id == g.id and g.can_guard_simultaneously:
-                score -= 50
-                
+                if ratio >= 1.0: score += 1000 
+                else: score += ratio * 100
+            else: score += 2000
+            
+            if self._is_activity_window(g, slot.day_of_week, slot.hour): score += 500
+            if other_group_id == g.id and g.can_guard_simultaneously: score -= 50
             candidates.append((score, g))
             
         candidates.sort(key=lambda x: x[0])
-        
-        if candidates:
-            return candidates[0][1]
+        if candidates: return candidates[0][1]
         return None
 
     def _is_group_available(self, group: Group, day: int, hour: int, date_str: str) -> bool:
-        # 1. Check Date Constraints (Specific dates override general rules)
-        # Logic:
-        # - If there is a "Not Available" constraint for this date/hour -> False
-        # - If there is an "Available" constraint for this date -> Only True if within that constraint's hours
-        
-        has_positive_constraint_for_date = False
-        is_allowed_by_positive = False
-        
-        for constraint in group.date_constraints:
-            if date_str in constraint.dates:
-                if not constraint.is_available:
-                    # Negative constraint: If we are in the forbidden range, return False
-                    if constraint.start_hour <= hour < constraint.end_hour:
-                        return False
+        has_positive = False
+        allowed = False
+        for c in group.date_constraints:
+            if date_str in c.dates:
+                if not c.is_available:
+                    if c.start_hour <= hour < c.end_hour: return False
                 else:
-                    # Positive constraint: We found at least one rule saying "Available here"
-                    has_positive_constraint_for_date = True
-                    if constraint.start_hour <= hour < constraint.end_hour:
-                        is_allowed_by_positive = True
+                    has_positive = True
+                    if c.start_hour <= hour < c.end_hour: allowed = True
         
-        if has_positive_constraint_for_date:
-            # If we have positive constraints for this day, we must satisfy at least one of them
-            if not is_allowed_by_positive:
-                return False
-            # If satisfied, we ignore general weekly rules? 
-            # Usually specific overrides general. So if I say "Available 8-12 on 1/1", 
-            # I probably don't care about "Not available on Sundays".
-            return True
+        if has_positive: return allowed
 
-        # 2. Check General Weekly Constraints
         for rule in group.hard_unavailability_rules:
-            if rule.day == day:
-                 if rule.start_hour <= hour < rule.end_hour:
-                     return False
+            if rule.day == day and rule.start_hour <= hour < rule.end_hour: return False
         return True
 
     def _is_activity_window(self, group: Group, day: int, hour: int) -> bool:
         for rule in group.primary_activity_windows:
-            if rule.day == day:
-                 if rule.start_hour <= hour < rule.end_hour:
-                     return True
+            if rule.day == day and rule.start_hour <= hour < rule.end_hour: return True
         return False
 
-    def _calculate_schedule_score(self) -> float:
+    def _calculate_global_score(self, state: ScheduleState) -> float:
         score = 0
-        for slot in self.schedule.slots:
-            group = self._get_group(slot.group_id)
-            score += self._calculate_local_score(slot, group)
-        return score
-
-    def _calculate_local_score(self, slot: ScheduleSlot, group: Optional[Group]) -> float:
-        if not group: return 0
-        score = 0
-        
-        if self._is_activity_window(group, slot.day_of_week, slot.hour):
-            score += 100
-            
-        other = self._get_other_slot(slot)
-        if other and other.group_id == group.id:
-            score -= 50
-            
+        for g in self.groups:
+            score += state.get_group_consecutive_score(g.id)
+        score += state.get_simultaneous_score()
         return score
 
     def validate_schedule(self) -> List[str]:
         errors = []
-        # Basic validation
         for slot in self.schedule.slots:
-            if slot.group_id:
+            if slot.group_id and slot.group_id != DISABLED_ID:
                 group = self._get_group(slot.group_id)
                 if not group: continue
-                
                 if not self._is_group_available(group, slot.day_of_week, slot.hour, slot.date):
                     errors.append(f"Group {group.name} unavailable at {slot.date} {slot.hour}:00")
-                    
-                other = self._get_other_slot(slot)
-                if other and other.group_id == group.id and not group.can_guard_simultaneously:
-                    errors.append(f"Group {group.name} double guarding at {slot.date} {slot.hour}:00")
-
         return errors

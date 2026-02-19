@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from shmirot_gdud.core.models import Group, TimeWindow, Schedule, ScheduleRange, DateConstraint
 from shmirot_gdud.core.scheduler import Scheduler
-from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog, DateConstraintDialog
+from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog, DateConstraintDialog, ImprovementSettingsDialog
 from shmirot_gdud.gui.schedule_grid import ScheduleGrid, DISABLED_ID
 from shmirot_gdud.gui.utils import bidi_text
 
@@ -225,7 +225,7 @@ class App:
         self.fill_btn = ttk.Button(top_frame, text=bidi_text("2. מלא אוטומטית"), command=self._fill_schedule, state="disabled")
         self.fill_btn.pack(side=tk.LEFT, padx=5)
         
-        self.improve_btn = ttk.Button(top_frame, text=bidi_text("3. שפר סידור"), command=self._improve_current_schedule, state="disabled")
+        self.improve_btn = ttk.Button(top_frame, text=bidi_text("3. שפר סידור"), command=self._open_improvement_dialog, state="disabled")
         self.improve_btn.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(top_frame, text=bidi_text("ייצוא לאקסל"), command=self._export_excel).pack(side=tk.LEFT, padx=5)
@@ -318,22 +318,54 @@ class App:
         finally:
             self.root.config(cursor="")
 
-    def _improve_current_schedule(self):
+    def _open_improvement_dialog(self):
         if not self.schedule: return
         
-        self.root.config(cursor="watch")
+        def on_confirm(hard_start: int, hard_end: int):
+            self._improve_current_schedule(hard_start, hard_end)
+            
+        ImprovementSettingsDialog(self.root, on_confirm)
+
+    def _improve_current_schedule(self, hard_start: int = 2, hard_end: int = 6):
+        if not self.schedule: return
+        
+        # Create progress window
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title(bidi_text("משפר סידור..."))
+        progress_win.geometry("350x150")
+        progress_win.transient(self.root) # Keep on top
+        progress_win.grab_set() # Modal
+        
+        ttk.Label(progress_win, text=bidi_text("אנא המתן, מבצע אופטימיזציה...")).pack(pady=10)
+        
+        progress_bar = ttk.Progressbar(progress_win, orient=tk.HORIZONTAL, length=300, mode='determinate')
+        progress_bar.pack(pady=5)
+        
+        percent_label = ttk.Label(progress_win, text="0.00%")
+        percent_label.pack(pady=5)
+        
         self.root.update()
         
+        def update_progress(val):
+            progress_bar['value'] = val
+            percent_label.config(text=f"{val:.2f}%")
+            print(f"{val:.2f}%")
+            self.root.update()
+
         try:
             scheduler = Scheduler(self.groups)
             scheduler.schedule = self.schedule
-            self.schedule = scheduler.improve_schedule()
+            # Pass hard hours and callback to improve_schedule
+            self.schedule = scheduler.improve_schedule(hard_start, hard_end, update_progress)
             
             self.schedule_grid.set_schedule(self.schedule)
             self._update_stats_content()
+            
+            progress_win.destroy()
             messagebox.showinfo(bidi_text("הצלחה"), bidi_text("השיפור הושלם"))
-        finally:
-            self.root.config(cursor="")
+        except Exception as e:
+            progress_win.destroy()
+            messagebox.showerror(bidi_text("שגיאה"), str(e))
 
     def _update_stats_content(self):
         if not self.schedule or not self.groups:
@@ -680,27 +712,19 @@ class App:
             total_slots = len(valid_slots)
             
             group_counts = {g.id: 0 for g in self.groups}
-            group_hard_counts = {g.id: 0 for g in self.groups}
-            
             for slot in valid_slots:
                 if slot.group_id and slot.group_id in group_counts:
                     group_counts[slot.group_id] += 1
-                    if 2 <= slot.hour < 6:
-                        group_hard_counts[slot.group_id] += 1
             
             stats_data = []
             for g in self.groups:
                 count = group_counts[g.id]
-                hard_count = group_hard_counts[g.id]
                 percent = (count / total_slots * 100) if total_slots > 0 else 0
-                hard_percent = (hard_count / count * 100) if count > 0 else 0
-                
                 stats_data.append({
                     "קבוצה": g.name,
                     "סד\"כ": g.staffing_size,
                     "משמרות": count,
-                    "אחוז": f"{percent:.1f}%",
-                    "לילה (2-6)": f"{hard_percent:.1f}%"
+                    "אחוז": f"{percent:.1f}%"
                 })
             df_stats = pd.DataFrame(stats_data)
 

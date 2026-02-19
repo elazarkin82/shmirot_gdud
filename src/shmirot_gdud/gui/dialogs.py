@@ -65,7 +65,7 @@ class CalendarWidget(ttk.Frame):
                 
                 if day != 0:
                     date_str = f"{self.display_year}-{self.display_month:02d}-{day:02d}"
-
+                    
                     bg_color = "white"
                     if date_str in self.selected_dates:
                         bg_color = "#aaddff"
@@ -185,11 +185,11 @@ class DateConstraintDialog(tk.Toplevel):
             
         # Sort by date
         sorted_constraints = sorted(self.constraints, key=lambda c: c.dates[0] if c.dates else "")
-
+        
         for c in sorted_constraints:
             type_str = "זמין" if c.is_available else "לא זמין"
             hours_str = f"{c.start_hour:02d}:00 - {c.end_hour:02d}:00"
-
+            
             # Since we split constraints, each should have exactly one date
             if c.dates:
                 date_str = c.dates[0]
@@ -223,7 +223,7 @@ class DateConstraintDialog(tk.Toplevel):
             return
 
         is_avail = self.type_var.get()
-
+        
         # Check conflicts and add individually
         for date_str in dates:
             # Check conflict for this specific date
@@ -235,11 +235,11 @@ class DateConstraintDialog(tk.Toplevel):
                         if c.is_available != is_avail:
                             messagebox.showerror(bidi_text("התנגשות"), bidi_text(f"קיימת התנגשות בתאריך {date_str}"))
                             return
-
+            
             # Create separate constraint for each date
             new_constraint = DateConstraint([date_str], start, end, is_avail)
             self.constraints.append(new_constraint)
-
+            
         self._refresh_list()
         self.calendar.clear_selection()
 
@@ -250,16 +250,16 @@ class DateConstraintDialog(tk.Toplevel):
             # The tree is sorted, so index might not match
             item = selection[0]
             values = self.tree.item(item, "values")
-
+            
             # Reconstruct to find match
             # values = (Type, Hours, Date)
             # We need to be careful with bidi text reversal when matching
-
+            
             # Simpler way: keep a map or just iterate and match properties
             # Since we refresh list from sorted_constraints, let's use the same sort logic to find index
             sorted_constraints = sorted(self.constraints, key=lambda c: c.dates[0] if c.dates else "")
             index_in_sorted = self.tree.index(item)
-
+            
             if 0 <= index_in_sorted < len(sorted_constraints):
                 target = sorted_constraints[index_in_sorted]
                 self.constraints.remove(target)
@@ -554,3 +554,51 @@ class DateRangeDialog(tk.Toplevel):
             
         except ValueError:
             messagebox.showerror(bidi_text("שגיאה"), bidi_text("תאריך לא תקין"))
+
+class ImprovementSettingsDialog(tk.Toplevel):
+    def __init__(self, parent, on_confirm: Callable[[int, int], None]):
+        super().__init__(parent)
+        self.title(bidi_text("הגדרות שיפור סידור"))
+        self.geometry("400x250")
+        self.on_confirm = on_confirm
+        
+        self._create_ui()
+
+    def _create_ui(self):
+        main_frame = ttk.Frame(self, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text=bidi_text("הגדרת שעות קשות (לילה)"), font=("Arial", 12, "bold")).pack(pady=10)
+        
+        hours_frame = ttk.Frame(main_frame)
+        hours_frame.pack(pady=10)
+        
+        ttk.Label(hours_frame, text=bidi_text("עד שעה:")).pack(side=tk.RIGHT, padx=5)
+        self.end_var = tk.StringVar(value="6")
+        ttk.Entry(hours_frame, textvariable=self.end_var, width=5).pack(side=tk.RIGHT)
+        
+        ttk.Label(hours_frame, text=bidi_text("משעה:")).pack(side=tk.RIGHT, padx=5)
+        self.start_var = tk.StringVar(value="2")
+        ttk.Entry(hours_frame, textvariable=self.start_var, width=5).pack(side=tk.RIGHT)
+        
+        ttk.Label(main_frame, text=bidi_text("האלגוריתם ינסה לאזן את השעות הללו בין הקבוצות")).pack(pady=5)
+        
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=20)
+        
+        ttk.Button(btn_frame, text=bidi_text("התחל שיפור"), command=self._confirm).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_frame, text=bidi_text("ביטול"), command=self.destroy).pack(side=tk.LEFT, padx=5)
+
+    def _confirm(self):
+        try:
+            start = int(self.start_var.get())
+            end = int(self.end_var.get())
+            
+            if not (0 <= start < 24): raise ValueError
+            if not (0 <= end <= 24): raise ValueError
+            
+            self.on_confirm(start, end)
+            self.destroy()
+            
+        except ValueError:
+            messagebox.showerror(bidi_text("שגיאה"), bidi_text("שעות לא תקינות"))

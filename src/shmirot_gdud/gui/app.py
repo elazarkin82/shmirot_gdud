@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from shmirot_gdud.core.models import Group, TimeWindow, Schedule, ScheduleRange
 from shmirot_gdud.core.scheduler import Scheduler
 from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog
-from shmirot_gdud.gui.schedule_grid import ScheduleGrid
+from shmirot_gdud.gui.schedule_grid import ScheduleGrid, DISABLED_ID
 from shmirot_gdud.gui.utils import bidi_text
 
 class App:
@@ -165,7 +165,7 @@ class App:
                 except ValueError:
                     pass
             group.id = str(max_id + 1)
-
+            
             self.groups.append(group)
             self._refresh_group_list()
             
@@ -290,11 +290,14 @@ class App:
         for item in self.stats_tree.get_children():
             self.stats_tree.delete(item)
             
-        total_slots = len(self.schedule.slots)
+        # Count only valid slots (not disabled)
+        valid_slots = [s for s in self.schedule.slots if s.group_id != DISABLED_ID]
+        total_slots = len(valid_slots)
+        
         group_counts = {g.id: 0 for g in self.groups}
         
-        for slot in self.schedule.slots:
-            if slot.group_id in group_counts:
+        for slot in valid_slots:
+            if slot.group_id and slot.group_id in group_counts:
                 group_counts[slot.group_id] += 1
                 
         for g in self.groups:
@@ -541,8 +544,13 @@ class App:
                     g1_id = slot_map.get((date_str, hour, 1))
                     g2_id = slot_map.get((date_str, hour, 2))
                     
-                    g1_name = next((g.name for g in self.groups if g.id == g1_id), "")
-                    g2_name = next((g.name for g in self.groups if g.id == g2_id), "")
+                    # Helper to get name
+                    def get_name(gid):
+                        if gid == DISABLED_ID: return "---"
+                        return next((g.name for g in self.groups if g.id == gid), "")
+                    
+                    g1_name = get_name(g1_id)
+                    g2_name = get_name(g2_id)
                     
                     row[f"{header} עמדה 1"] = g1_name
                     row[f"{header} עמדה 2"] = g2_name
@@ -566,10 +574,13 @@ class App:
             df_groups = pd.DataFrame(groups_data)
             
             # Stats Data
-            total_slots = len(self.schedule.slots)
+            # Count only valid slots (not disabled)
+            valid_slots = [s for s in self.schedule.slots if s.group_id != DISABLED_ID]
+            total_slots = len(valid_slots)
+            
             group_counts = {g.id: 0 for g in self.groups}
-            for slot in self.schedule.slots:
-                if slot.group_id in group_counts:
+            for slot in valid_slots:
+                if slot.group_id and slot.group_id in group_counts:
                     group_counts[slot.group_id] += 1
             
             stats_data = []
@@ -614,6 +625,9 @@ class App:
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                         if cell.value in color_map:
                             fill = PatternFill(start_color=color_map[cell.value], end_color=color_map[cell.value], fill_type="solid")
+                            cell.fill = fill
+                        elif cell.value == "---": # Disabled
+                            fill = PatternFill(start_color="555555", end_color="555555", fill_type="solid")
                             cell.fill = fill
                 
                 workbook['קבוצות'].sheet_view.rightToLeft = True

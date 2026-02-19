@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from shmirot_gdud.core.models import Schedule, Group, ScheduleSlot
 from shmirot_gdud.gui.utils import bidi_text
 
+DISABLED_ID = "DISABLED"
+
 class ScheduleGrid(tk.Canvas):
     def __init__(self, parent, groups: List[Group], on_change: Callable[[], bool], **kwargs):
         super().__init__(parent, **kwargs)
@@ -49,7 +51,7 @@ class ScheduleGrid(tk.Canvas):
         start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
         end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
         num_days = (end_date - start_date).days + 1
-
+        
         grid_width = num_days * self.cell_width
         total_width = grid_width + self.sidebar_width
         total_height = self.header_height + 24 * self.cell_height
@@ -72,17 +74,15 @@ class ScheduleGrid(tk.Canvas):
             
             # Header background
             self.create_rectangle(x, 0, x + self.cell_width, self.header_height, fill="#e0e0e0", outline="")
-
+            
             # Calculate day name
-            # Python weekday: Mon=0...Sun=6
-            # Our array: Sun=0...Sat=6
             py_wd = current.weekday()
             our_wd = (py_wd + 1) % 7
             day_name = self.days_names[our_wd]
             date_str = current.strftime("%d/%m")
-
+            
             self.create_text(x + self.cell_width//2, self.header_height//2, text=bidi_text(f"{day_name} {date_str}"))
-
+            
             current += timedelta(days=1)
 
         # Draw Grid Content
@@ -93,7 +93,7 @@ class ScheduleGrid(tk.Canvas):
         current = start_date
         for d in range(num_days):
             date_str = current.strftime("%Y-%m-%d")
-
+            
             for h in range(24):
                 x = (num_days - 1 - d) * self.cell_width
                 y = self.header_height + h * self.cell_height
@@ -136,6 +136,10 @@ class ScheduleGrid(tk.Canvas):
 
     def _get_group_info(self, group_id):
         if not group_id: return "", "white"
+        
+        if group_id == DISABLED_ID:
+            return "---", "#555555" # Dark gray for disabled
+            
         for g in self.groups:
             if g.id == group_id:
                 return g.name, g.color
@@ -147,9 +151,9 @@ class ScheduleGrid(tk.Canvas):
         start_date = datetime.strptime(self.schedule.start_date, "%Y-%m-%d")
         end_date = datetime.strptime(self.schedule.end_date, "%Y-%m-%d")
         num_days = (end_date - start_date).days + 1
-
+        
         grid_width = num_days * self.cell_width
-
+        
         if x >= grid_width or y < self.header_height:
             return None
             
@@ -160,7 +164,7 @@ class ScheduleGrid(tk.Canvas):
         
         target_date = start_date + timedelta(days=d_idx)
         date_str = target_date.strftime("%Y-%m-%d")
-
+        
         h = int((y - self.header_height) // self.cell_height)
         if not (0 <= h < 24): return None
             
@@ -240,8 +244,12 @@ class ScheduleGrid(tk.Canvas):
         
         # Add "Clear" option
         menu.add_command(label=bidi_text("נקה משבצת"), command=lambda: self._replace_group_in_slot(slot, None))
+        
+        # Add "Disable" option
+        menu.add_command(label=bidi_text("נטרל משבצת"), command=lambda: self._replace_group_in_slot(slot, DISABLED_ID))
+        
         menu.add_separator()
-
+        
         for group in self.groups:
             menu.add_command(label=bidi_text(group.name), command=lambda gid=group.id: self._replace_group_in_slot(slot, gid))
             
@@ -279,8 +287,6 @@ class ScheduleGrid(tk.Canvas):
         id2 = s2.group_id if s2 else None
         
         # Update model temporarily
-        # If we swap manually, we lock the destination slots?
-        # Usually manual swap implies user intent, so let's lock them.
         self.schedule.set_slot(slot1[0], slot1[1], slot1[2], id2, lock=True)
         self.schedule.set_slot(slot2[0], slot2[1], slot2[2], id1, lock=True)
         

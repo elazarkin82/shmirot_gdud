@@ -28,6 +28,9 @@ class ScheduleGrid(tk.Canvas):
         
         self.days_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
         
+        # Highlight state
+        self.highlighted_group_id: Optional[str] = None
+
         # Drag state
         self.drag_start_slot: Optional[Tuple[str, int, int]] = None 
         self.drag_ghost_rect = None
@@ -44,6 +47,11 @@ class ScheduleGrid(tk.Canvas):
 
     def refresh_groups(self, groups: List[Group]):
         self.groups = groups
+        self.redraw()
+
+    def set_highlighted_group(self, group_id: Optional[str]):
+        """Sets the group to highlight. Pass None to clear highlight."""
+        self.highlighted_group_id = group_id
         self.redraw()
 
     def zoom(self, factor: float):
@@ -69,14 +77,9 @@ class ScheduleGrid(tk.Canvas):
         
         if num_days == 0: return
 
-        # Calculate available width for grid (total - sidebar)
-        # We need to solve: num_days * (base_width * scale) + (base_sidebar * scale) = canvas_width
-        # scale * (num_days * base_width + base_sidebar) = canvas_width
-        
         total_base_content = (num_days * self.base_cell_width) + self.base_sidebar_width
         new_scale = canvas_width / total_base_content
         
-        # Apply limits
         if new_scale < 0.2: new_scale = 0.2
         
         self.scale = new_scale
@@ -155,13 +158,13 @@ class ScheduleGrid(tk.Canvas):
                 s1 = slot_map.get((date_str, h, 1))
                 g1_id = s1.group_id if s1 else None
                 g1_name, g1_color = self._get_group_info(g1_id)
-                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (date_str, h, 1), font_size)
+                self._draw_slot(x + half_width, y, half_width, self.cell_height, bidi_text(g1_name), g1_color, (date_str, h, 1), font_size, g1_id)
                 
                 # Position 2 (Left half)
                 s2 = slot_map.get((date_str, h, 2))
                 g2_id = s2.group_id if s2 else None
                 g2_name, g2_color = self._get_group_info(g2_id)
-                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (date_str, h, 2), font_size)
+                self._draw_slot(x, y, half_width, self.cell_height, bidi_text(g2_name), g2_color, (date_str, h, 2), font_size, g2_id)
 
             current += timedelta(days=1)
 
@@ -179,13 +182,36 @@ class ScheduleGrid(tk.Canvas):
         # Update scroll region
         self.config(scrollregion=(0, 0, total_width, total_height))
 
-    def _draw_slot(self, x, y, w, h, text, color, slot_key, font_size):
+    def _draw_slot(self, x, y, w, h, text, color, slot_key, font_size, group_id):
+        # Determine visual style based on highlight
+        fill_color = color
+        outline_color = "lightgray"
+        text_color = "black"
+        width = 1
+        
+        if self.highlighted_group_id:
+            if group_id == self.highlighted_group_id:
+                # This is the highlighted group
+                outline_color = "black"
+                width = 2
+            else:
+                # This is NOT the highlighted group - dim it
+                if group_id == DISABLED_ID:
+                    fill_color = "#eeeeee" # Lighter gray than normal disabled
+                    text_color = "#aaaaaa"
+                elif group_id:
+                    fill_color = "#f9f9f9" # Very light gray (almost white)
+                    text_color = "#cccccc" # Dimmed text
+                else:
+                    # Empty slot
+                    pass
+
         # Background
-        rect_id = self.create_rectangle(x, y, x+w, y+h, fill=color, outline="lightgray", tags=f"slot_{slot_key}")
+        rect_id = self.create_rectangle(x, y, x+w, y+h, fill=fill_color, outline=outline_color, width=width, tags=f"slot_{slot_key}")
+        
         # Text
-        # Only draw text if cell is big enough
         if h > 10 and w > 20:
-            text_id = self.create_text(x+w//2, y+h//2, text=text, font=("Arial", font_size), tags=f"text_{slot_key}")
+            text_id = self.create_text(x+w//2, y+h//2, text=text, fill=text_color, font=("Arial", font_size), tags=f"text_{slot_key}")
 
     def _get_group_info(self, group_id):
         if not group_id: return "", "white"

@@ -196,6 +196,10 @@ class App:
         self.stats_tree.column("Percent", width=50, anchor="center")
         
         self.stats_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.stats_tree.bind('<<TreeviewSelect>>', self._on_stats_select) # Bind selection event
+
+        # Clear Highlight Button
+        ttk.Button(stats_frame, text=bidi_text("בטל הדגשה"), command=self._clear_highlight).pack(fill=tk.X, padx=5, pady=5)
 
         # Right Panel: Schedule Grid
         right_container = ttk.Frame(main_paned)
@@ -247,6 +251,38 @@ class App:
             self.fill_btn.configure(state="normal")
             self.improve_btn.configure(state="normal")
 
+    def _on_stats_select(self, event):
+        selection = self.stats_tree.selection()
+        if not selection:
+            # Don't clear highlight here! Let the clear button do it.
+            # This prevents clearing when selection is lost due to rebuild.
+            return
+            
+        # Get the group name from the selected item
+        item = selection[0]
+        values = self.stats_tree.item(item, "values")
+        if not values: return
+        
+        group_name_bidi = values[0]
+        
+        found_id = None
+        for g in self.groups:
+            if bidi_text(g.name) == group_name_bidi:
+                found_id = g.id
+                break
+        
+        self.schedule_grid.set_highlighted_group(found_id)
+
+    def _clear_highlight(self):
+        # Clear selection in treeview
+        if hasattr(self, 'stats_tree'):
+            for item in self.stats_tree.selection():
+                self.stats_tree.selection_remove(item)
+        
+        # Clear highlight in grid
+        if hasattr(self, 'schedule_grid'):
+            self.schedule_grid.set_highlighted_group(None)
+
     def _open_date_range_dialog(self):
         def on_confirm(start_date: str, end_date: str):
             self.schedule = Schedule.create_empty(start_date, end_date)
@@ -295,6 +331,11 @@ class App:
         if not self.schedule or not self.groups:
             return
             
+        # Save current selection
+        selected_group_id = None
+        if hasattr(self, 'schedule_grid') and self.schedule_grid.highlighted_group_id:
+            selected_group_id = self.schedule_grid.highlighted_group_id
+
         for item in self.stats_tree.get_children():
             self.stats_tree.delete(item)
             
@@ -313,7 +354,11 @@ class App:
             percent = (count / total_slots * 100) if total_slots > 0 else 0
             staffing = str(g.staffing_size) if g.staffing_size is not None else "-"
             
-            self.stats_tree.insert("", tk.END, values=(bidi_text(g.name), staffing, count, f"{percent:.1f}%"))
+            item_id = self.stats_tree.insert("", tk.END, values=(bidi_text(g.name), staffing, count, f"{percent:.1f}%"))
+            
+            # Restore selection if needed
+            if selected_group_id and g.id == selected_group_id:
+                self.stats_tree.selection_set(item_id)
 
     def _update_stats(self):
         if hasattr(self, 'stats_tree'):

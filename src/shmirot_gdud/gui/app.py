@@ -6,9 +6,9 @@ import pandas as pd
 from openpyxl.styles import PatternFill, Alignment
 from datetime import datetime, timedelta
 
-from shmirot_gdud.core.models import Group, TimeWindow, Schedule, ScheduleRange
+from shmirot_gdud.core.models import Group, TimeWindow, Schedule, ScheduleRange, DateConstraint
 from shmirot_gdud.core.scheduler import Scheduler
-from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog
+from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog, DateConstraintDialog
 from shmirot_gdud.gui.schedule_grid import ScheduleGrid, DISABLED_ID
 from shmirot_gdud.gui.utils import bidi_text
 
@@ -143,6 +143,12 @@ class App:
         self.constraints_list.pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(self.details_frame, text=bidi_text("ניהול אי-זמינות"), command=self._manage_unavailability).pack(fill=tk.X, padx=5, pady=2)
 
+        # Date Constraints List
+        ttk.Label(self.details_frame, text=bidi_text("אילוצי תאריכים ספציפיים:")).pack(anchor=tk.E, padx=5, pady=(10, 0))
+        self.date_constraints_list = tk.Listbox(self.details_frame, height=5, justify="right")
+        self.date_constraints_list.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(self.details_frame, text=bidi_text("ניהול אילוצי תאריכים"), command=self._manage_date_constraints).pack(fill=tk.X, padx=5, pady=2)
+
         # Activity Windows List
         ttk.Label(self.details_frame, text=bidi_text("חלונות פעילות עיקרית:")).pack(anchor=tk.E, padx=5, pady=(10, 0))
         self.activity_list = tk.Listbox(self.details_frame, height=5, justify="right")
@@ -179,21 +185,23 @@ class App:
         main_paned.pack(fill=tk.BOTH, expand=True)
 
         # Left Panel: Stats
-        stats_frame = ttk.Frame(main_paned, width=300)
+        stats_frame = ttk.Frame(main_paned, width=350) # Increased width for new column
         main_paned.add(stats_frame, weight=1)
         
         ttk.Label(stats_frame, text=bidi_text("סטטיסטיקות שיבוץ"), font=("Arial", 14, "bold")).pack(pady=10)
         
-        self.stats_tree = ttk.Treeview(stats_frame, columns=("Name", "Staffing", "Count", "Percent"), show="headings")
+        self.stats_tree = ttk.Treeview(stats_frame, columns=("Name", "Staffing", "Count", "Percent", "Hard"), show="headings")
         self.stats_tree.heading("Name", text=bidi_text("קבוצה"))
         self.stats_tree.heading("Staffing", text=bidi_text("סד\"כ"))
         self.stats_tree.heading("Count", text=bidi_text("משמרות"))
         self.stats_tree.heading("Percent", text=bidi_text("%"))
+        self.stats_tree.heading("Hard", text=bidi_text("לילה (2-6)"))
         
-        self.stats_tree.column("Name", width=100, anchor="center")
-        self.stats_tree.column("Staffing", width=50, anchor="center")
-        self.stats_tree.column("Count", width=60, anchor="center")
-        self.stats_tree.column("Percent", width=50, anchor="center")
+        self.stats_tree.column("Name", width=90, anchor="center")
+        self.stats_tree.column("Staffing", width=40, anchor="center")
+        self.stats_tree.column("Count", width=50, anchor="center")
+        self.stats_tree.column("Percent", width=40, anchor="center")
+        self.stats_tree.column("Hard", width=70, anchor="center")
         
         self.stats_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.stats_tree.bind('<<TreeviewSelect>>', self._on_stats_select) # Bind selection event
@@ -344,17 +352,32 @@ class App:
         total_slots = len(valid_slots)
         
         group_counts = {g.id: 0 for g in self.groups}
+        group_hard_counts = {g.id: 0 for g in self.groups}
         
         for slot in valid_slots:
             if slot.group_id and slot.group_id in group_counts:
                 group_counts[slot.group_id] += 1
+                # Check for hard hours (02:00 - 06:00)
+                # Range is [2, 6) -> 2, 3, 4, 5
+                if 2 <= slot.hour < 6:
+                    group_hard_counts[slot.group_id] += 1
                 
         for g in self.groups:
             count = group_counts[g.id]
+            hard_count = group_hard_counts[g.id]
+            
             percent = (count / total_slots * 100) if total_slots > 0 else 0
+            hard_percent = (hard_count / count * 100) if count > 0 else 0
+            
             staffing = str(g.staffing_size) if g.staffing_size is not None else "-"
             
-            item_id = self.stats_tree.insert("", tk.END, values=(bidi_text(g.name), staffing, count, f"{percent:.1f}%"))
+            item_id = self.stats_tree.insert("", tk.END, values=(
+                bidi_text(g.name), 
+                staffing, 
+                count, 
+                f"{percent:.1f}%",
+                f"{hard_percent:.1f}%"
+            ))
             
             # Restore selection if needed
             if selected_group_id and g.id == selected_group_id:
@@ -391,6 +414,7 @@ class App:
             
             self._refresh_constraints_list(group)
             self._refresh_activity_list(group)
+            self._refresh_date_constraints_list(group)
 
     def _refresh_constraints_list(self, group: Group):
         self.constraints_list.delete(0, tk.END)
@@ -398,6 +422,17 @@ class App:
         for c in group.hard_unavailability_rules:
             day_str = days[c.day] if 0 <= c.day < 7 else str(c.day)
             self.constraints_list.insert(tk.END, bidi_text(f"{day_str} {c.start_hour:02d}:00 - {c.end_hour:02d}:00"))
+
+    def _refresh_date_constraints_list(self, group: Group):
+        self.date_constraints_list.delete(0, tk.END)
+        for c in group.date_constraints:
+            type_str = "זמין" if c.is_available else "לא זמין"
+            dates_str = f"{len(c.dates)} תאריכים"
+            if len(c.dates) <= 2:
+                short_dates = [d[5:].replace("-", "/") for d in c.dates]
+                dates_str = ", ".join(short_dates)
+            
+            self.date_constraints_list.insert(tk.END, bidi_text(f"{type_str} {c.start_hour:02d}-{c.end_hour:02d} ({dates_str})"))
 
     def _refresh_activity_list(self, group: Group):
         self.activity_list.delete(0, tk.END)
@@ -447,6 +482,18 @@ class App:
             
             TimeWindowDialog(self.root, bidi_text(f"אי-זמינות עבור {group.name}"), group.hard_unavailability_rules, on_save)
 
+    def _manage_date_constraints(self):
+        selection = self.group_listbox.curselection()
+        if selection:
+            idx = selection[0]
+            group = self.groups[idx]
+            
+            def on_save(constraints):
+                group.date_constraints = constraints
+                self._refresh_date_constraints_list(group)
+            
+            DateConstraintDialog(self.root, bidi_text(f"אילוצי תאריכים עבור {group.name}"), group.date_constraints, on_save)
+
     def _manage_activity(self):
         selection = self.group_listbox.curselection()
         if selection:
@@ -466,6 +513,7 @@ class App:
         self.simultaneous_var.set(True)
         self.constraints_list.delete(0, tk.END)
         self.activity_list.delete(0, tk.END)
+        self.date_constraints_list.delete(0, tk.END)
 
     def _on_schedule_change(self) -> bool:
         # Validate the change
@@ -632,19 +680,27 @@ class App:
             total_slots = len(valid_slots)
             
             group_counts = {g.id: 0 for g in self.groups}
+            group_hard_counts = {g.id: 0 for g in self.groups}
+            
             for slot in valid_slots:
                 if slot.group_id and slot.group_id in group_counts:
                     group_counts[slot.group_id] += 1
+                    if 2 <= slot.hour < 6:
+                        group_hard_counts[slot.group_id] += 1
             
             stats_data = []
             for g in self.groups:
                 count = group_counts[g.id]
+                hard_count = group_hard_counts[g.id]
                 percent = (count / total_slots * 100) if total_slots > 0 else 0
+                hard_percent = (hard_count / count * 100) if count > 0 else 0
+                
                 stats_data.append({
                     "קבוצה": g.name,
                     "סד\"כ": g.staffing_size,
                     "משמרות": count,
-                    "אחוז": f"{percent:.1f}%"
+                    "אחוז": f"{percent:.1f}%",
+                    "לילה (2-6)": f"{hard_percent:.1f}%"
                 })
             df_stats = pd.DataFrame(stats_data)
 

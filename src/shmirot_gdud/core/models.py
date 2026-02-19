@@ -38,6 +38,30 @@ class TimeWindow:
         )
 
 @dataclass
+class DateConstraint:
+    dates: List[str] # List of ISO date strings "YYYY-MM-DD"
+    start_hour: int
+    end_hour: int
+    is_available: bool # True = Available only at these times, False = Not available
+
+    def to_dict(self):
+        return {
+            "dates": self.dates,
+            "start_hour": self.start_hour,
+            "end_hour": self.end_hour,
+            "is_available": self.is_available
+        }
+
+    @staticmethod
+    def from_dict(data):
+        return DateConstraint(
+            dates=data["dates"],
+            start_hour=data["start_hour"],
+            end_hour=data["end_hour"],
+            is_available=data["is_available"]
+        )
+
+@dataclass
 class Group:
     id: str
     name: str
@@ -45,6 +69,7 @@ class Group:
     weekly_guard_quota: Optional[int] = None # Hard constraint if set
     hard_unavailability_rules: List[TimeWindow] = field(default_factory=list)
     primary_activity_windows: List[TimeWindow] = field(default_factory=list)
+    date_constraints: List[DateConstraint] = field(default_factory=list) # New field
     can_guard_simultaneously: bool = True
     color: str = field(default_factory=generate_pastel_color)
     
@@ -59,6 +84,7 @@ class Group:
             "weekly_guard_quota": self.weekly_guard_quota,
             "hard_unavailability_rules": [r.to_dict() for r in self.hard_unavailability_rules],
             "primary_activity_windows": [w.to_dict() for w in self.primary_activity_windows],
+            "date_constraints": [c.to_dict() for c in self.date_constraints],
             "can_guard_simultaneously": self.can_guard_simultaneously,
             "color": self.color
         }
@@ -72,6 +98,7 @@ class Group:
             weekly_guard_quota=data.get("weekly_guard_quota"),
             hard_unavailability_rules=[TimeWindow.from_dict(r) for r in data.get("hard_unavailability_rules", [])],
             primary_activity_windows=[TimeWindow.from_dict(w) for w in data.get("primary_activity_windows", [])],
+            date_constraints=[DateConstraint.from_dict(c) for c in data.get("date_constraints", [])],
             can_guard_simultaneously=data.get("can_guard_simultaneously", True),
             color=data.get("color", generate_pastel_color())
         )
@@ -147,8 +174,6 @@ class Schedule:
         while current <= end:
             # In Python weekday() is Mon=0, Sun=6. 
             # We want Sun=0, Sat=6.
-            # Python: Mon(0), Tue(1), Wed(2), Thu(3), Fri(4), Sat(5), Sun(6)
-            # Ours:   Sun(0), Mon(1), Tue(2), Wed(3), Thu(4), Fri(5), Sat(6)
             py_weekday = current.weekday()
             our_weekday = (py_weekday + 1) % 7
             

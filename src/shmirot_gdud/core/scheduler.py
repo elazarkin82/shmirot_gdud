@@ -118,16 +118,6 @@ class Scheduler:
             
         iterations = 2000
         
-        # Only consider slots that are NOT locked (manually set)
-        # But for now we assume manual set = locked? 
-        # The user requirement said "manual list forced", so we should treat pre-filled as locked or high penalty to move.
-        # Let's assume we can swap anything that wasn't explicitly locked, 
-        # BUT the fill_schedule logic filled empty slots. 
-        # If the user manually placed them, they are likely "locked" conceptually.
-        # Let's add a simple check: if a slot was pre-filled before fill_schedule, we shouldn't move it?
-        # For now, let's assume all slots are swappable unless we add a specific flag.
-        # I added is_locked to ScheduleSlot model.
-        
         mutable_slots = [s for s in self.schedule.slots if not s.is_locked]
         if len(mutable_slots) < 2:
             return self.schedule
@@ -180,8 +170,8 @@ class Scheduler:
 
     def _is_swap_valid(self, s1: ScheduleSlot, g1: Optional[Group], s2: ScheduleSlot, g2: Optional[Group]) -> bool:
         # Check availability
-        if g1 and not self._is_group_available(g1, s2.day_of_week, s2.hour): return False
-        if g2 and not self._is_group_available(g2, s1.day_of_week, s1.hour): return False
+        if g1 and not self._is_group_available(g1, s2.day_of_week, s2.hour, s2.date): return False
+        if g2 and not self._is_group_available(g2, s1.day_of_week, s1.hour, s1.date): return False
         
         # Check simultaneous
         if g1:
@@ -207,7 +197,7 @@ class Scheduler:
         
         for g in groups:
             # Hard constraint: Availability
-            if not self._is_group_available(g, slot.day_of_week, slot.hour):
+            if not self._is_group_available(g, slot.day_of_week, slot.hour, slot.date):
                 continue
             
             # Hard constraint: Simultaneous
@@ -243,7 +233,37 @@ class Scheduler:
             return candidates[0][1]
         return None
 
-    def _is_group_available(self, group: Group, day: int, hour: int) -> bool:
+    def _is_group_available(self, group: Group, day: int, hour: int, date_str: str) -> bool:
+        # 1. Check Date Constraints (Specific dates override general rules)
+        # Logic:
+        # - If there is a "Not Available" constraint for this date/hour -> False
+        # - If there is an "Available" constraint for this date -> Only True if within that constraint's hours
+        
+        has_positive_constraint_for_date = False
+        is_allowed_by_positive = False
+        
+        for constraint in group.date_constraints:
+            if date_str in constraint.dates:
+                if not constraint.is_available:
+                    # Negative constraint: If we are in the forbidden range, return False
+                    if constraint.start_hour <= hour < constraint.end_hour:
+                        return False
+                else:
+                    # Positive constraint: We found at least one rule saying "Available here"
+                    has_positive_constraint_for_date = True
+                    if constraint.start_hour <= hour < constraint.end_hour:
+                        is_allowed_by_positive = True
+        
+        if has_positive_constraint_for_date:
+            # If we have positive constraints for this day, we must satisfy at least one of them
+            if not is_allowed_by_positive:
+                return False
+            # If satisfied, we ignore general weekly rules? 
+            # Usually specific overrides general. So if I say "Available 8-12 on 1/1", 
+            # I probably don't care about "Not available on Sundays".
+            return True
+
+        # 2. Check General Weekly Constraints
         for rule in group.hard_unavailability_rules:
             if rule.day == day:
                  if rule.start_hour <= hour < rule.end_hour:
@@ -285,7 +305,7 @@ class Scheduler:
                 group = self._get_group(slot.group_id)
                 if not group: continue
                 
-                if not self._is_group_available(group, slot.day_of_week, slot.hour):
+                if not self._is_group_available(group, slot.day_of_week, slot.hour, slot.date):
                     errors.append(f"Group {group.name} unavailable at {slot.date} {slot.hour}:00")
                     
                 other = self._get_other_slot(slot)

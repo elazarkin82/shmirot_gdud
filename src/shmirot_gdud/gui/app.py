@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 
 from shmirot_gdud.core.models import Group, TimeWindow, Schedule, ScheduleRange, DateConstraint
 from shmirot_gdud.core.scheduler import Scheduler
-from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog, DateConstraintDialog, ImprovementSettingsDialog
+from shmirot_gdud.core.config import config
+from shmirot_gdud.gui.dialogs import TimeWindowDialog, GroupCreationDialog, DateRangeDialog, DateConstraintDialog, ImprovementSettingsDialog, AdvancedSettingsDialog
 from shmirot_gdud.gui.schedule_grid import ScheduleGrid, DISABLED_ID
 from shmirot_gdud.gui.utils import bidi_text
 
@@ -17,6 +18,9 @@ class App:
         self.root = root
         self.root.title(bidi_text("מערכת שיבוץ שמירות גדודית"))
         self.root.geometry("1400x800") # Increased width for stats panel
+
+        # Ensure config file exists
+        config.save()
 
         self.groups: List[Group] = []
         self.schedule: Optional[Schedule] = None
@@ -35,6 +39,8 @@ class App:
         file_menu.add_command(label=bidi_text("שמור סידור עבודה"), command=self._save_schedule)
         file_menu.add_separator()
         file_menu.add_command(label=bidi_text("ייצוא לאקסל"), command=self._export_excel)
+        file_menu.add_separator()
+        file_menu.add_command(label=bidi_text("הגדרות ניקוד"), command=self._open_advanced_settings)
         file_menu.add_separator()
         file_menu.add_command(label=bidi_text("יציאה"), command=self.root.quit)
         menubar.add_cascade(label=bidi_text("קובץ"), menu=file_menu)
@@ -326,6 +332,9 @@ class App:
             
         ImprovementSettingsDialog(self.root, on_confirm)
 
+    def _open_advanced_settings(self):
+        AdvancedSettingsDialog(self.root)
+
     def _improve_current_schedule(self, hard_start: int = 2, hard_end: int = 6):
         if not self.schedule: return
         
@@ -349,7 +358,6 @@ class App:
         def update_progress(val):
             progress_bar['value'] = val
             percent_label.config(text=f"{val:.2f}%")
-            print(f"{val:.2f}%")
             self.root.update()
 
         try:

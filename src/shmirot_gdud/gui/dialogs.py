@@ -4,6 +4,7 @@ from typing import List, Callable, Optional, Tuple, Set
 from datetime import datetime, date, timedelta
 import calendar
 from shmirot_gdud.core.models import TimeWindow, Group, ScheduleRange, DateConstraint
+from shmirot_gdud.core.config import config
 from shmirot_gdud.gui.utils import bidi_text
 
 # Set calendar to start on Sunday
@@ -555,11 +556,69 @@ class DateRangeDialog(tk.Toplevel):
         except ValueError:
             messagebox.showerror(bidi_text("שגיאה"), bidi_text("תאריך לא תקין"))
 
+class AdvancedSettingsDialog(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title(bidi_text("הגדרות ניקוד מתקדמות"))
+        self.geometry("500x450")
+        
+        self._create_ui()
+
+    def _create_ui(self):
+        main_frame = ttk.Frame(self, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create entries for each config value
+        self.entries = {}
+        
+        row = 0
+        
+        def add_field(label, key, tooltip=""):
+            nonlocal row
+            ttk.Label(main_frame, text=bidi_text(label)).grid(row=row, column=1, sticky=tk.E, pady=5)
+            var = tk.StringVar(value=str(getattr(config, key)))
+            ttk.Entry(main_frame, textvariable=var, width=10).grid(row=row, column=0, pady=5)
+            self.entries[key] = var
+            row += 1
+
+        add_field("בונוס זוגות (שלילי):", "SIMULTANEOUS_BONUS")
+        add_field("בונוס רצף לשעה (שלילי):", "CONSECUTIVE_BONUS_PER_HOUR")
+        add_field("קנס חריגה מרצף (מקדם):", "CONSECUTIVE_PENALTY_MULTIPLIER")
+        add_field("קנס חריגה מרצף (חזקה):", "CONSECUTIVE_PENALTY_EXPONENT")
+        add_field("קנס מנוחה:", "REST_PENALTY")
+        add_field("קנס חלון פעילות:", "ACTIVITY_WINDOW_PENALTY")
+        add_field("קנס שעה קשה:", "HARD_HOUR_PENALTY_BASE")
+        add_field("קנס פיזור (אותו יום):", "SAME_DAY_PENALTY")
+        
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
+        
+        ttk.Button(btn_frame, text=bidi_text("שמור"), command=self._save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_frame, text=bidi_text("ביטול"), command=self.destroy).pack(side=tk.LEFT, padx=5)
+
+    def _save(self):
+        try:
+            for key, var in self.entries.items():
+                val = var.get()
+                # Determine type (int or float)
+                current_val = getattr(config, key)
+                if isinstance(current_val, float):
+                    new_val = float(val)
+                else:
+                    new_val = int(val)
+                setattr(config, key, new_val)
+            
+            config.save()
+            messagebox.showinfo(bidi_text("הצלחה"), bidi_text("ההגדרות נשמרו בהצלחה"))
+            self.destroy()
+        except ValueError:
+            messagebox.showerror(bidi_text("שגיאה"), bidi_text("ערכים לא תקינים"))
+
 class ImprovementSettingsDialog(tk.Toplevel):
     def __init__(self, parent, on_confirm: Callable[[int, int], None]):
         super().__init__(parent)
         self.title(bidi_text("הגדרות שיפור סידור"))
-        self.geometry("400x250")
+        self.geometry("400x250") # Reduced height
         self.on_confirm = on_confirm
         
         self._create_ui()
@@ -582,6 +641,8 @@ class ImprovementSettingsDialog(tk.Toplevel):
         ttk.Entry(hours_frame, textvariable=self.start_var, width=5).pack(side=tk.RIGHT)
         
         ttk.Label(main_frame, text=bidi_text("האלגוריתם ינסה לאזן את השעות הללו בין הקבוצות")).pack(pady=5)
+        
+        # Removed Advanced Settings Button
         
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=20)

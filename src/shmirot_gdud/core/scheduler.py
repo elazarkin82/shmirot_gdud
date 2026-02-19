@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional, Tuple, Callable, Set
 from .models import Group, Schedule, ScheduleSlot, TimeWindow
+from .config import config
 import random
 import math
 import time
@@ -91,7 +92,7 @@ class ScheduleState:
                 if current_seq == 0 and last_active_idx != -999:
                     rest_time = idx - last_active_idx - 1
                     if rest_time < 6:
-                        score += (6 - rest_time) * 1000
+                        score += (6 - rest_time) * config.REST_PENALTY
                 
                 current_seq += 1
                 last_active_idx = idx
@@ -99,20 +100,17 @@ class ScheduleState:
                 if current_seq > 0:
                     if current_seq <= max_consecutive:
                         # Bonus for sequence
-                        score -= (current_seq * 50)
+                        score -= (current_seq * config.CONSECUTIVE_BONUS_PER_HOUR)
                     else:
                         # Penalty for exceeding limit
                         excess = current_seq - max_consecutive
-                        score += (excess ** 2) * 500
+                        score += (excess ** config.CONSECUTIVE_PENALTY_EXPONENT) * config.CONSECUTIVE_PENALTY_MULTIPLIER
                     
                     current_seq = 0
                     
         return score
 
     def get_simultaneous_score(self) -> float:
-        """
-        Calculates global score for simultaneous guarding (same group in both positions).
-        """
         score = 0
         for date_str, hour in self.time_points:
             s1 = self.slot_map.get((date_str, hour, 1))
@@ -121,8 +119,7 @@ class ScheduleState:
             if s1 and s2 and s1.group_id and s2.group_id:
                 if s1.group_id != DISABLED_ID and s2.group_id != DISABLED_ID:
                     if s1.group_id == s2.group_id:
-                        # Big bonus for same group
-                        score -= 500 
+                        score -= config.SIMULTANEOUS_BONUS
         return score
 
 class Scheduler:
@@ -215,7 +212,6 @@ class Scheduler:
         if len(mutable_slots) < 2:
             return self.schedule
 
-        # Optimization: Create a fast lookup map for slots
         self.slot_map = {}
         for s in self.schedule.slots:
             self.slot_map[(s.date, s.hour, s.position)] = s
@@ -228,9 +224,11 @@ class Scheduler:
         available_groups = [g for g in self.groups if g.validate()]
         hard_targets = self._calculate_hard_targets(available_groups, total_hard_slots)
 
-        # Initialize State
         state = ScheduleState(self.schedule, self.groups, hard_start, hard_end)
         
+        current_global_score = self._calculate_global_score(state)
+        print(f"Initial Score: {current_global_score}")
+
         max_passes = 5
         n = len(mutable_slots)
         print(f"Mutable slots: {n}, Max passes: {max_passes}")
@@ -239,7 +237,6 @@ class Scheduler:
             print(f"--- Pass {pass_num + 1}/{max_passes} ---")
             improved = False
             
-            # Phase 1: Single Swaps
             for i in range(n):
                 if i % 20 == 0 and progress_callback:
                     p = (pass_num + (i / n) * 0.5) / max_passes * 100
@@ -257,22 +254,16 @@ class Scheduler:
                     if not self._is_swap_valid(s1, self._get_group(g1_id), s2, self._get_group(g2_id)):
                         continue
 
-                    # Calculate Score Delta
-                    # 1. Consecutive Score Delta
                     score_g1_before = state.get_group_consecutive_score(g1_id)
                     score_g2_before = state.get_group_consecutive_score(g2_id)
                     
-                    # 2. Simultaneous Score Delta (Local)
                     sim_delta = self._calculate_simultaneous_delta(s1, s2, g1_id, g2_id)
                     
-                    # Perform tentative swap in memory
                     s1.group_id, s2.group_id = g2_id, g1_id
                     
-                    # After swap
                     score_g1_after = state.get_group_consecutive_score(g1_id)
                     score_g2_after = state.get_group_consecutive_score(g2_id)
                     
-                    # 3. Other Local Scores (Hard Hours, Activity)
                     local_delta = self._calculate_simple_local_delta(s1, s2, g1_id, g2_id, hard_start, hard_end, hard_targets)
                     
                     consecutive_delta = (score_g1_after + score_g2_after) - (score_g1_before + score_g2_before)
@@ -280,10 +271,8 @@ class Scheduler:
                     total_delta = local_delta + consecutive_delta + sim_delta
                     
                     if total_delta < 0:
-                        # Keep swap
                         improved = True
                     else:
-                        # Revert
                         s1.group_id, s2.group_id = g1_id, g2_id
             
             if not improved:
@@ -302,34 +291,19 @@ class Scheduler:
         return self.schedule
 
     def _calculate_simultaneous_delta(self, s1: ScheduleSlot, s2: ScheduleSlot, old_g1_id: str, old_g2_id: str) -> float:
-        """
-        Calculates the change in simultaneous score if s1 and s2 swap groups.
-        s1 currently has old_g1_id, s2 has old_g2_id.
-        After swap: s1 has old_g2_id, s2 has old_g1_id.
-        """
         delta = 0
         
-        # Check s1 location
         other_s1 = self._get_other_slot_fast(s1)
         if other_s1:
-            # Before: s1=g1, other=?
-            if other_s1.group_id == old_g1_id: delta += 500 # Lost bonus
-            # After: s1=g2, other=?
-            # Note: if other_s1 IS s2, then other's group also changes!
+            if other_s1.group_id == old_g1_id: delta += config.SIMULTANEOUS_BONUS 
             other_gid_after = old_g1_id if other_s1 == s2 else other_s1.group_id
-            if other_gid_after == old_g2_id: delta -= 500 # Gained bonus
+            if other_gid_after == old_g2_id: delta -= config.SIMULTANEOUS_BONUS 
             
-        # Check s2 location
-        # If s1 and s2 are in same hour, we already handled the pair in s1 check (other_s1 == s2).
-        # We should avoid double counting.
         if other_s1 != s2:
             other_s2 = self._get_other_slot_fast(s2)
             if other_s2:
-                # Before: s2=g2, other=?
-                if other_s2.group_id == old_g2_id: delta += 500 # Lost bonus
-                # After: s2=g1, other=?
-                # other_s2 cannot be s1 here because we checked other_s1 != s2
-                if other_s2.group_id == old_g1_id: delta -= 500 # Gained bonus
+                if other_s2.group_id == old_g2_id: delta += config.SIMULTANEOUS_BONUS 
+                if other_s2.group_id == old_g1_id: delta -= config.SIMULTANEOUS_BONUS 
                 
         return delta
 
@@ -345,31 +319,11 @@ class Scheduler:
             targets[g.id] = (w / total_weight) * total_hard_slots
         return targets
 
-    def _calculate_swap_delta(self, s1: ScheduleSlot, s2: ScheduleSlot, hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
-        # This method is now redundant as logic moved inside loop for efficiency with state
-        return 0
-
-    def _calculate_block_swap_delta(self, block1: List[ScheduleSlot], block2: List[ScheduleSlot], hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
-        # Placeholder if we re-enable block swaps
-        return 0
-
-    def _perform_swap(self, s1: ScheduleSlot, s2: ScheduleSlot):
-        s1.group_id, s2.group_id = s2.group_id, s1.group_id
-
-    def _perform_block_swap(self, block1: List[ScheduleSlot], block2: List[ScheduleSlot]):
-        for k in range(len(block1)):
-            self._perform_swap(block1[k], block2[k])
-
     def _calculate_simple_local_delta(self, s1: ScheduleSlot, s2: ScheduleSlot, old_g1_id: str, old_g2_id: str, hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
-        # s1 now has old_g2_id, s2 now has old_g1_id
-        # Calculate score for s1 with new group (g2)
         score_s1_new = self._get_single_slot_score(s1, old_g2_id, hard_start, hard_end, hard_targets)
-        # Calculate score for s1 with old group (g1)
         score_s1_old = self._get_single_slot_score(s1, old_g1_id, hard_start, hard_end, hard_targets)
         
-        # Calculate score for s2 with new group (g1)
         score_s2_new = self._get_single_slot_score(s2, old_g1_id, hard_start, hard_end, hard_targets)
-        # Calculate score for s2 with old group (g2)
         score_s2_old = self._get_single_slot_score(s2, old_g2_id, hard_start, hard_end, hard_targets)
         
         return (score_s1_new + score_s2_new) - (score_s1_old + score_s2_old)
@@ -379,31 +333,21 @@ class Scheduler:
         score = 0
         group = self._get_group(group_id)
         
-        # Activity Window
         if self._is_activity_window(group, slot.day_of_week, slot.hour):
-            score += 1000
+            score += config.ACTIVITY_WINDOW_PENALTY
             
-        # Hard Hours Balance (Simple penalty for being in hard hour)
         if hard_start <= slot.hour < hard_end:
             target = hard_targets.get(group_id, 1.0)
             if target > 0:
                 score += (100 / target) 
             else:
-                score += 200 
+                score += config.HARD_HOUR_PENALTY_BASE
                 
-        # Distribution (Same day count)
-        # This is expensive to calc here, maybe skip or approximate?
-        # Let's skip for speed in this delta function, consecutive score handles clustering mostly.
-        
+        same_day_count = self._count_group_on_day(group.id, slot.date)
+        if same_day_count > 2: 
+             score += (same_day_count - 2) * config.SAME_DAY_PENALTY
+             
         return score
-
-    def _get_local_score(self, slot: ScheduleSlot, group: Optional[Group], hard_start: int, hard_end: int, hard_targets: Dict[str, float]) -> float:
-        # Legacy method, replaced by _get_single_slot_score
-        return 0
-
-    def _has_consecutive_conflict(self, slot: ScheduleSlot, group: Group) -> bool:
-        # Legacy method, replaced by state.get_group_consecutive_score
-        return False
 
     def _count_group_on_day(self, group_id: str, date_str: str) -> int:
         count = 0

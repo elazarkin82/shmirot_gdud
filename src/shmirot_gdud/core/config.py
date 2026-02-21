@@ -7,19 +7,19 @@ CONFIG_FILE_NAME = "shmirot_config.json"
 @dataclass
 class ScoringConfig:
     # Bonuses (Positive values add to score, which is good)
-    SIMULTANEOUS_BONUS: int = 500 # Increased to prioritize pairs
-    CONSECUTIVE_BONUS_PER_HOUR: int = 50 # Decreased to make pairs more attractive
+    SIMULTANEOUS_BONUS: int = 1000
+    CONSECUTIVE_BONUS_PER_HOUR: int = 400
     STAFFING_RULE_BONUS: int = 300 
     LONG_REST_BONUS: int = 100 
     
     # Penalties (Positive values subtract from score, which is bad)
     CONSECUTIVE_PENALTY_EXPONENT: float = 2.0
-    CONSECUTIVE_PENALTY_MULTIPLIER: int = 500
+    CONSECUTIVE_PENALTY_MULTIPLIER: int = 1500
     REST_PENALTY: int = 1000 
-    SHORT_REST_PENALTY: int = 50 
-    ACTIVITY_WINDOW_PENALTY: int = 1000
-    HARD_HOUR_PENALTY_BASE: int = 50
-    SAME_DAY_PENALTY: int = 50
+    SHORT_REST_PENALTY: int = 500 
+    ACTIVITY_WINDOW_PENALTY: int = 400
+    HARD_HOUR_PENALTY_BASE: int = 200
+    SAME_DAY_PENALTY: int = 500
     
     @staticmethod
     def load() -> 'ScoringConfig':

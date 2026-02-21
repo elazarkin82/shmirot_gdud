@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 from typing import List, Callable, Optional, Tuple, Set
 from datetime import datetime, date, timedelta
 import calendar
-from shmirot_gdud.core.models import TimeWindow, Group, ScheduleRange, DateConstraint
+from shmirot_gdud.core.models import TimeWindow, Group, ScheduleRange, DateConstraint, StaffingRule, StaffingException
 from shmirot_gdud.core.config import config
 from shmirot_gdud.gui.utils import bidi_text
 
@@ -663,3 +663,262 @@ class ImprovementSettingsDialog(tk.Toplevel):
             
         except ValueError:
             messagebox.showerror(bidi_text("שגיאה"), bidi_text("שעות לא תקינות"))
+
+class StaffingRulesDialog(tk.Toplevel):
+    def __init__(self, parent, title: str, rules: List[StaffingRule], on_save: Callable[[List[StaffingRule]], None]):
+        super().__init__(parent)
+        self.title(bidi_text(title))
+        self.geometry("700x500")
+        self.rules = [r for r in rules] # Copy
+        self.on_save = on_save
+
+        self._create_ui()
+
+    def _create_ui(self):
+        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left: List
+        left_frame = ttk.LabelFrame(main_paned, text=bidi_text("חוקים קיימים"))
+        main_paned.add(left_frame, weight=1)
+        
+        self.tree = ttk.Treeview(left_frame, columns=("Day", "Hours", "Max", "Pair"), show="headings")
+        self.tree.heading("Day", text=bidi_text("יום"))
+        self.tree.heading("Hours", text=bidi_text("שעות"))
+        self.tree.heading("Max", text=bidi_text("מקסימום"))
+        self.tree.heading("Pair", text=bidi_text("זוגות חובה"))
+        
+        self.tree.column("Day", width=60, anchor="center")
+        self.tree.column("Hours", width=80, anchor="center")
+        self.tree.column("Max", width=60, anchor="center")
+        self.tree.column("Pair", width=80, anchor="center")
+        
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        ttk.Button(left_frame, text=bidi_text("מחק נבחר"), command=self._delete_rule).pack(fill=tk.X, padx=5, pady=5)
+        
+        # Right: Editor
+        right_frame = ttk.LabelFrame(main_paned, text=bidi_text("הוספת חוק"))
+        main_paned.add(right_frame, weight=1)
+        
+        # Day
+        ttk.Label(right_frame, text=bidi_text("יום:")).pack(anchor=tk.E, padx=5)
+        self.day_var = tk.StringVar()
+        days_list = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "כל השבוע"]
+        self.day_combo = ttk.Combobox(right_frame, textvariable=self.day_var, values=[bidi_text(d) for d in days_list], state="readonly", justify="right")
+        self.day_combo.pack(fill=tk.X, padx=5)
+        
+        # Hours
+        hours_frame = ttk.Frame(right_frame)
+        hours_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(hours_frame, text=bidi_text("עד:")).pack(side=tk.RIGHT)
+        self.end_var = tk.StringVar()
+        ttk.Entry(hours_frame, textvariable=self.end_var, width=5).pack(side=tk.RIGHT)
+        ttk.Label(hours_frame, text=bidi_text("מ:")).pack(side=tk.RIGHT)
+        self.start_var = tk.StringVar()
+        ttk.Entry(hours_frame, textvariable=self.start_var, width=5).pack(side=tk.RIGHT)
+        
+        # Constraints
+        self.max_var = tk.StringVar()
+        ttk.Label(right_frame, text=bidi_text("מקסימום עמדות (ריק = ללא הגבלה):")).pack(anchor=tk.E, padx=5, pady=(10,0))
+        ttk.Entry(right_frame, textvariable=self.max_var, justify="right").pack(fill=tk.X, padx=5)
+        
+        self.pair_var = tk.BooleanVar()
+        ttk.Checkbutton(right_frame, text=bidi_text("חובה זוגות (או כלום)"), variable=self.pair_var).pack(anchor=tk.E, padx=5, pady=5)
+        
+        ttk.Button(right_frame, text=bidi_text("הוסף חוק"), command=self._add_rule).pack(fill=tk.X, padx=20, pady=20)
+        
+        # Bottom
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text=bidi_text("שמור וסגור"), command=self._save).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text=bidi_text("ביטול"), command=self.destroy).pack(side=tk.LEFT, padx=5)
+        
+        self._refresh_list()
+
+    def _refresh_list(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        days = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+        for r in self.rules:
+            day_str = days[r.day] if 0 <= r.day < 7 else str(r.day)
+            hours_str = f"{r.start_hour:02d}-{r.end_hour:02d}"
+            max_str = str(r.max_capacity) if r.max_capacity is not None else "-"
+            pair_str = "כן" if r.force_coupling else "לא"
+            
+            self.tree.insert("", tk.END, values=(bidi_text(day_str), hours_str, max_str, bidi_text(pair_str)))
+
+    def _add_rule(self):
+        try:
+            day_str = self.day_var.get()
+            raw_days = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+            days_display = [bidi_text(d) for d in raw_days]
+            all_week = bidi_text("כל השבוע")
+            
+            target_days = []
+            if day_str == all_week:
+                target_days = list(range(7))
+            elif day_str in days_display:
+                target_days = [days_display.index(day_str)]
+            else:
+                raise ValueError(bidi_text("יש לבחור יום"))
+                
+            start = int(self.start_var.get())
+            end = int(self.end_var.get())
+            if not (0 <= start < 24 and 0 <= end <= 24 and start < end): raise ValueError
+            
+            max_cap = None
+            if self.max_var.get().strip():
+                max_cap = int(self.max_var.get())
+                if max_cap < 0: raise ValueError
+                
+            force = self.pair_var.get()
+            
+            for d in target_days:
+                self.rules.append(StaffingRule(d, start, end, max_cap, force))
+                
+            self._refresh_list()
+            
+        except ValueError:
+            messagebox.showerror(bidi_text("שגיאה"), bidi_text("ערכים לא תקינים"))
+
+    def _delete_rule(self):
+        selection = self.tree.selection()
+        if selection:
+            idx = self.tree.index(selection[0])
+            del self.rules[idx]
+            self._refresh_list()
+
+    def _save(self):
+        self.on_save(self.rules)
+        self.destroy()
+
+class StaffingExceptionsDialog(tk.Toplevel):
+    def __init__(self, parent, title: str, exceptions: List[StaffingException], on_save: Callable[[List[StaffingException]], None]):
+        super().__init__(parent)
+        self.title(bidi_text(title))
+        self.geometry("800x500")
+        self.exceptions = [e for e in exceptions]
+        self.on_save = on_save
+        
+        self._create_ui()
+
+    def _create_ui(self):
+        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left: List
+        left_frame = ttk.LabelFrame(main_paned, text=bidi_text("חריגות קיימות"))
+        main_paned.add(left_frame, weight=1)
+        
+        self.tree = ttk.Treeview(left_frame, columns=("Start", "End", "Size"), show="headings")
+        self.tree.heading("Start", text=bidi_text("התחלה"))
+        self.tree.heading("End", text=bidi_text("סיום"))
+        self.tree.heading("Size", text=bidi_text("סד\"כ"))
+        
+        self.tree.column("Start", width=120, anchor="center")
+        self.tree.column("End", width=120, anchor="center")
+        self.tree.column("Size", width=50, anchor="center")
+        
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        ttk.Button(left_frame, text=bidi_text("מחק נבחר"), command=self._delete_exc).pack(fill=tk.X, padx=5, pady=5)
+        
+        # Right: Editor
+        right_frame = ttk.LabelFrame(main_paned, text=bidi_text("הוספת חריגה"))
+        main_paned.add(right_frame, weight=1)
+        
+        today = date.today()
+        
+        ttk.Label(right_frame, text=bidi_text("התחלה:")).pack(anchor=tk.E, padx=5)
+        self.start_picker = self._create_datetime_picker(right_frame, today)
+        self.start_picker.pack(fill=tk.X, padx=5)
+        
+        ttk.Label(right_frame, text=bidi_text("סיום:")).pack(anchor=tk.E, padx=5, pady=(10,0))
+        self.end_picker = self._create_datetime_picker(right_frame, today)
+        self.end_picker.pack(fill=tk.X, padx=5)
+        
+        ttk.Label(right_frame, text=bidi_text("סד\"כ חדש:")).pack(anchor=tk.E, padx=5, pady=(10,0))
+        self.size_var = tk.StringVar()
+        ttk.Entry(right_frame, textvariable=self.size_var, justify="right").pack(fill=tk.X, padx=5)
+        
+        ttk.Button(right_frame, text=bidi_text("הוסף חריגה"), command=self._add_exc).pack(fill=tk.X, padx=20, pady=20)
+        
+        # Bottom
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text=bidi_text("שמור וסגור"), command=self._save).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text=bidi_text("ביטול"), command=self.destroy).pack(side=tk.LEFT, padx=5)
+        
+        self._refresh_list()
+
+    def _create_datetime_picker(self, parent, default_date):
+        frame = ttk.Frame(parent)
+        
+        # Date
+        year_var = tk.StringVar(value=str(default_date.year))
+        years = [str(y) for y in range(default_date.year - 1, default_date.year + 5)]
+        ttk.Combobox(frame, textvariable=year_var, values=years, width=6, state="readonly").pack(side=tk.LEFT)
+        
+        month_var = tk.StringVar(value=f"{default_date.month:02d}")
+        months = [f"{m:02d}" for m in range(1, 13)]
+        ttk.Combobox(frame, textvariable=month_var, values=months, width=4, state="readonly").pack(side=tk.LEFT)
+        
+        day_var = tk.StringVar(value=f"{default_date.day:02d}")
+        days = [f"{d:02d}" for d in range(1, 32)]
+        ttk.Combobox(frame, textvariable=day_var, values=days, width=4, state="readonly").pack(side=tk.LEFT)
+        
+        # Time
+        ttk.Label(frame, text="@").pack(side=tk.LEFT, padx=2)
+        hour_var = tk.StringVar(value="00")
+        hours = [f"{h:02d}" for h in range(24)]
+        ttk.Combobox(frame, textvariable=hour_var, values=hours, width=4, state="readonly").pack(side=tk.LEFT)
+        
+        frame.vars = (year_var, month_var, day_var, hour_var)
+        return frame
+
+    def _get_datetime(self, frame):
+        y, m, d, h = frame.vars
+        return f"{y.get()}-{m.get()}-{d.get()}", int(h.get())
+
+    def _refresh_list(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        for e in self.exceptions:
+            start_str = f"{e.start_date} {e.start_hour:02d}:00"
+            end_str = f"{e.end_date} {e.end_hour:02d}:00"
+            self.tree.insert("", tk.END, values=(start_str, end_str, str(e.new_staffing_size)))
+
+    def _add_exc(self):
+        try:
+            s_date, s_hour = self._get_datetime(self.start_picker)
+            e_date, e_hour = self._get_datetime(self.end_picker)
+            
+            size = int(self.size_var.get())
+            if size < 0: raise ValueError
+            
+            # Validate order
+            dt_start = datetime.strptime(f"{s_date} {s_hour}", "%Y-%m-%d %H")
+            dt_end = datetime.strptime(f"{e_date} {e_hour}", "%Y-%m-%d %H")
+            
+            if dt_end <= dt_start:
+                messagebox.showerror(bidi_text("שגיאה"), bidi_text("זמן סיום חייב להיות אחרי התחלה"))
+                return
+                
+            self.exceptions.append(StaffingException(s_date, s_hour, e_date, e_hour, size))
+            self._refresh_list()
+            
+        except ValueError:
+            messagebox.showerror(bidi_text("שגיאה"), bidi_text("ערכים לא תקינים"))
+
+    def _delete_exc(self):
+        selection = self.tree.selection()
+        if selection:
+            idx = self.tree.index(selection[0])
+            del self.exceptions[idx]
+            self._refresh_list()
+
+    def _save(self):
+        self.on_save(self.exceptions)
+        self.destroy()
